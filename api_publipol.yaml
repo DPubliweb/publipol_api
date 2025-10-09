@@ -1,0 +1,283 @@
+openapi: 3.0.3
+info:
+  title: Publibot API
+  version: 1.0.4
+  description: >
+    API Publibot pour le comptage, la commande et la facturation 
+    des campagnes SMS / Landing Pages, avec arborescence géographique hiérarchique.
+
+servers:
+  - url: https://api.publibot.com
+    description: Serveur de production
+  - url: https://sandbox.api.publibot.com
+    description: Serveur de test
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    BureauVote:
+      type: object
+      properties:
+        id_bdv:
+          type: string
+          example: "01004_0001"
+
+    Commune:
+      type: object
+      properties:
+        code_commune:
+          type: string
+          example: "01004"
+        nom_commune:
+          type: string
+          example: "Ambérieu-en-Bugey"
+        bureaux_de_vote:
+          type: array
+          items:
+            $ref: "#/components/schemas/BureauVote"
+
+    Circonscription:
+      type: object
+      properties:
+        code_circo:
+          type: string
+          example: "01005"
+        nom_circo:
+          type: string
+          example: "5e circonscription de l'Ain"
+        communes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Commune"
+
+    Departement:
+      type: object
+      properties:
+        code_departement:
+          type: string
+          example: "01"
+        nom_departement:
+          type: string
+          example: "Ain"
+        circonscriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Circonscription"
+
+    Region:
+      type: object
+      properties:
+        num_region:
+          type: string
+          example: "84"
+        nom_region:
+          type: string
+          example: "Auvergne-Rhône-Alpes"
+        departements:
+          type: array
+          items:
+            $ref: "#/components/schemas/Departement"
+
+    ZoneCiblage:
+      type: object
+      properties:
+        region:
+          $ref: "#/components/schemas/Region"
+        age_min:
+          type: integer
+          minimum: 18
+        age_max:
+          type: integer
+          maximum: 120
+        genre:
+          type: string
+          enum: [H, F]
+        election:
+          type: string
+        parti_politique:
+          type: string
+        nombre_votants:
+          type: integer
+        nombre_voix:
+          type: integer
+        pourcentage_voix:
+          type: number
+          format: float
+
+    Commande:
+      type: object
+      properties:
+        candidat:
+          type: object
+          properties:
+            id_paralos:
+              type: string
+              example: "PARA-12345"
+            nom: { type: string }
+            prenom: { type: string }
+            adresse: { type: string }
+            complement_adresse: { type: string }
+            cp: { type: string }
+            ville: { type: string }
+            tel1: { type: string }
+            tel2: { type: string }
+            email: { type: string }
+        mandataire:
+          type: object
+          properties:
+            nom: { type: string }
+            prenom: { type: string }
+            adresse: { type: string }
+            complement_adresse: { type: string }
+            cp: { type: string }
+            ville: { type: string }
+            tel1: { type: string }
+            tel2: { type: string }
+            email: { type: string }
+        lp:
+          type: object
+          description: Informations sur la landing page
+          properties:
+            active:
+              type: boolean
+              description: true si une landing page est incluse
+              example: true
+            type_lp:
+              type: string
+              enum: [standard, personnalisee]
+              description: Type de landing page souhaitée
+              example: "personnalisee"
+        lien_photo: { type: string }
+        lien_profession_de_foi: { type: string }
+        lien_bulletin_vote: { type: string }
+
+    Facture:
+      type: object
+      properties:
+        numero_facture: { type: string }
+        lien_facture: { type: string }
+        total_ht_euro: { type: number, format: float }
+        volume_sms: { type: integer }
+
+paths:
+  /ciblage:
+    post:
+      summary: Calcul du comptage de la cible électorale
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneCiblage"
+            example:
+              region:
+                num_region: "84"
+                nom_region: "Auvergne-Rhône-Alpes"
+                departements:
+                  - code_departement: "01"
+                    nom_departement: "Ain"
+                    circonscriptions:
+                      - code_circo: "01005"
+                        nom_circo: "5e circonscription de l'Ain"
+                        communes:
+                          - code_commune: "01004"
+                            nom_commune: "Ambérieu-en-Bugey"
+                            bureaux_de_vote:
+                              - id_bdv: "01004_0001"
+                              - id_bdv: "01004_0002"
+                              - id_bdv: "01004_0006"
+              age_min: 25
+              age_max: 65
+              genre: "H"
+              election: "Législatives 2025"
+              parti_politique: "RN"
+              nombre_votants: 12000
+              nombre_voix: 3500
+              pourcentage_voix: 29.1
+      responses:
+        "200":
+          description: Données de comptage et estimation initiale
+          content:
+            application/json:
+              example:
+                total_contacts: 8500
+                message: "Comptage effectué avec succès."
+
+  /commande:
+    post:
+      summary: Création d’une commande suite à validation du devis
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Commande"
+            example:
+              candidat:
+                id_paralos: "PARA-98765"
+                nom: "Dupont"
+                prenom: "Marie"
+                adresse: "12 rue des Lilas"
+                cp: "69003"
+                ville: "Lyon"
+                tel1: "0601020304"
+                email: "marie.dupont@example.com"
+              mandataire:
+                nom: "Martin"
+                prenom: "Paul"
+                adresse: "10 avenue de Paris"
+                cp: "75012"
+                ville: "Paris"
+                tel1: "0605060708"
+                email: "paul.martin@example.com"
+              lp:
+                active: true
+                type_lp: "personnalisee"
+              lien_photo: "https://cdn.publibot.com/photo_123.jpg"
+              lien_profession_de_foi: "https://cdn.publibot.com/profession.pdf"
+              lien_bulletin_vote: "https://cdn.publibot.com/bulletin.pdf"
+      responses:
+        "200":
+          description: Confirmation de commande
+          content:
+            application/json:
+              example:
+                commande_id: "CMD-2025-1145"
+                statut: "validée"
+                message: "Commande enregistrée avec succès."
+
+  /facture:
+    post:
+      summary: Envoi des informations de facturation
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Facture"
+            example:
+              numero_facture: "FAC-2025-001"
+              lien_facture: "https://cdn.publibot.com/facture_001.pdf"
+              total_ht_euro: 1890.50
+              volume_sms: 17000
+      responses:
+        "200":
+          description: Facture reçue
+          content:
+            application/json:
+              example:
+                message: "Facture enregistrée avec succès."
