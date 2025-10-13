@@ -1,97 +1,91 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 import uuid
+from dotenv import load_dotenv
 
-app = Flask(__name__)
+# Load environment variables
+load_dotenv()
 
-# ✅ Clé API lue depuis variable d'environnement Qoddi
 API_KEY = os.getenv("API_KEY")
 
-# ✅ Middleware de sécurité
-@app.before_request
-def check_api_key():
-    key = request.headers.get("x-api-key")
-    if not key or key != API_KEY:
-        return jsonify({"error": "Unauthorized - Invalid or missing API Key"}), 401
+app = Flask(__name__)
+CORS(app)
 
-# ✅ ROUTE 1 - /ciblage
+# Middleware for API key authentication
+@app.before_request
+def authenticate():
+    if request.path.startswith('/ciblage') or request.path.startswith('/commande'):
+        api_key = request.headers.get('x-api-key')
+        if api_key != API_KEY:
+            return jsonify({"error": "Unauthorized"}), 401
+
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json()
-    if not data or "geo_selection" not in data:
-        return jsonify({
-            "error": "Missing required field",
-            "missing_fields": ["geo_selection"]
-        }), 400
+    required_fields = ["geo_selection", "type_selection", "departement"]
+    
+    missing_fields = [f for f in required_fields if f not in data]
+    if missing_fields:
+        return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
 
-    # Placeholder comptage
-    return jsonify({
-        "message": "Ciblage reçu",
-        "count": 8500
-    }), 200
+    # Exemple de réponse simulée
+    response = {
+        "nombre_contacts": 8500,
+        "departement": data["departement"],
+        "type_selection": data["type_selection"],
+        "geo_selection": data["geo_selection"]
+    }
+    return jsonify(response)
 
-# ✅ ROUTE 2 - /tarification
-@app.route("/tarification", methods=["POST"])
-def tarification():
-    data = request.get_json()
-    required_fields = ["contacts", "sms_count", "lp"]
-
-    # ✅ Détection précise des champs manquants
-    missing = [field for field in required_fields if field not in data]
-    if missing:
-        return jsonify({
-            "error": "Missing required fields",
-            "missing_fields": missing
-        }), 400
-
-    # 👇 Exemple de calcul (modifiable plus tard)
-    montant = data["contacts"] * data["sms_count"] * 0.08
-    if data["lp"]:
-        montant += data["contacts"] * 0.02
-
-    return jsonify({
-        "tarif_total": round(montant, 2)
-    }), 200
-
-# ✅ ROUTE 3 - /commande
 @app.route("/commande", methods=["POST"])
 def commande():
     data = request.get_json()
 
-    # Vérification des 3 sections principales
-    required_sections = ["candidat", "mandataire", "lp"]
-    missing_sections = [s for s in required_sections if s not in data]
-    if missing_sections:
-        return jsonify({
-            "error": "Missing required section",
-            "missing_sections": missing_sections
-        }), 400
+    required_fields = [
+        # Candidat
+        "candidat_nom", "candidat_prenom", "candidat_id_paralos",
+        "candidat_adresse", "candidat_cp", "candidat_ville",
+        "candidat_tel1", "candidat_email",
+        # Mandataire
+        "mandataire_nom", "mandataire_prenom",
+        "mandataire_adresse", "mandataire_cp", "mandataire_ville",
+        "mandataire_tel1", "mandataire_email",
+        # LP
+        "lp_active", "type_lp", "photo_url", "profession_de_foi_url", "bulletin_url",
+        # Tarification
+        "nombre_contacts", "sms_count", "prix_total"
+    ]
 
-    # Validation champs obligatoires candidat
-    required_candidat = ["nom", "prenom", "id_paralos", "adresse", "cp", "ville", "tel1", "email"]
-    missing_candidat = [field for field in required_candidat if field not in data["candidat"]]
+    missing_fields = [f for f in required_fields if f not in data]
+    if missing_fields:
+        return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
 
-    # Validation champs obligatoires mandataire
-    required_mandataire = ["nom", "prenom", "adresse", "cp", "ville", "tel1", "email"]
-    missing_mandataire = [field for field in required_mandataire if field not in data["mandataire"]]
-
-    # Si manque des champs dans une section
-    if missing_candidat or missing_mandataire:
-        return jsonify({
-            "error": "Missing required fields",
-            "candidat_missing": missing_candidat,
-            "mandataire_missing": missing_mandataire
-        }), 400
-
-    # ✅ Génération ID commande unique
     commande_id = str(uuid.uuid4())
 
     return jsonify({
-        "message": "Commande enregistrée",
-        "commande_id": commande_id
-    }), 200
-
+        "commande_id": commande_id,
+        "statut": "reçue",
+        "details": {
+            "candidat": {
+                "nom": data["candidat_nom"],
+                "prenom": data["candidat_prenom"]
+            },
+            "mandataire": {
+                "nom": data["mandataire_nom"],
+                "prenom": data["mandataire_prenom"]
+            },
+            "lp": {
+                "active": data["lp_active"],
+                "type_lp": data["type_lp"]
+            },
+            "tarification": {
+                "contacts": data["nombre_contacts"],
+                "sms": data["sms_count"],
+                "prix": data["prix_total"]
+            }
+        }
+    })
 
 if __name__ == "__main__":
-    # ✅ Compatible Qoddi (port fixe 8002)
-    app.run(host="0.0.0.0", port=8002)
+    app.run(debug=True)
