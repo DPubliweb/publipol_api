@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import uuid
+import psycopg2
+
 
 API_KEY = os.getenv("API_KEY")
 
