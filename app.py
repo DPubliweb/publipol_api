@@ -2,10 +2,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import uuid
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
 
