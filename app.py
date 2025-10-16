@@ -41,20 +41,57 @@ def test_redshift():
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json()
-    required_fields = ["geo_selection", "type_selection", "departement"]
-    
+
+    # Validation des champs attendus
+    required_fields = ["geo_selection", "codes"]
     missing_fields = [f for f in required_fields if f not in data]
     if missing_fields:
         return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
 
-    # Exemple de réponse simulée
-    response = {
-        "nombre_contacts": 8500,
-        "departement": data["departement"],
-        "type_selection": data["type_selection"],
-        "geo_selection": data["geo_selection"]
-    }
-    return jsonify(response)
+    geo_field = data["geo_selection"]
+    codes = data["codes"]
+    age_min = data.get("age_min", 18)
+    age_max = data.get("age_max", 120)
+
+    # Vérification du champ geo_selection
+    valid_geo_fields = ["code_commune", "code_bdv", "code_circo"]
+    if geo_field not in valid_geo_fields:
+        return jsonify({"error": f"Invalid geo_selection. Must be one of {valid_geo_fields}"}), 400
+
+    # Construction dynamique de la requête
+    codes_list = "', '".join(codes)
+    query = f"""
+        SELECT COUNT(DISTINCT tel_mobile)
+        FROM paralos_data
+        WHERE {geo_field} IN ('{codes_list}')
+        AND age BETWEEN {age_min} AND {age_max};
+    """
+
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("REDSHIFT_DBNAME"),
+            user=os.getenv("REDSHIFT_USER"),
+            password=os.getenv("REDSHIFT_PASSWORD"),
+            host=os.getenv("REDSHIFT_HOST"),
+            port=os.getenv("REDSHIFT_PORT", 5439)
+        )
+        cur = conn.cursor()
+        cur.execute(query)
+        result = cur.fetchone()
+        count = result[0] if result else 0
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "status": "success ✅",
+            "geo_selection": geo_field,
+            "count": count,
+            "age_min": age_min,
+            "age_max": age_max
+        })
+    except Exception as e:
+        return jsonify({"status": "error ❌", "message": str(e)})
+
 
 @app.route("/commande", methods=["POST"])
 def commande():
