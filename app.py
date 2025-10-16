@@ -22,7 +22,7 @@ def authenticate():
 def test_redshift():
     try:
         conn = psycopg2.connect(
-            dbname=os.getenv("REDSHIFT_DB"),
+            dbname=os.getenv("REDSHIFT_DBNAME"),
             user=os.getenv("REDSHIFT_USER"),
             password=os.getenv("REDSHIFT_PASSWORD"),
             host=os.getenv("REDSHIFT_HOST"),
