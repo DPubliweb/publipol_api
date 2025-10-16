@@ -18,6 +18,26 @@ def authenticate():
         if api_key != API_KEY:
             return jsonify({"error": "Unauthorized"}), 401
 
+@app.route("/test-redshift")
+def test_redshift():
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("REDSHIFT_DB"),
+            user=os.getenv("REDSHIFT_USER"),
+            password=os.getenv("REDSHIFT_PASSWORD"),
+            host=os.getenv("REDSHIFT_HOST"),
+            port=os.getenv("REDSHIFT_PORT", 5439)
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT current_date;")
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        return jsonify({"status": "success ✅", "current_date": result[0]})
+    except Exception as e:
+        return jsonify({"status": "error ❌", "message": str(e)})
+    
+    
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json()
