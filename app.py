@@ -37,7 +37,7 @@ def test_redshift():
     except Exception as e:
         return jsonify({"status": "error ❌", "message": str(e)})
     
-    
+
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json()
@@ -106,4 +106,6 @@ def commande():
     })
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 8002))  # valeur par défaut 8002 en local
+    app.run(host="0.0.0.0", port=port, debug=True)
+
