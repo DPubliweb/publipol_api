@@ -129,17 +129,20 @@ def ciblage():
 def commande():
     data = request.get_json()
 
-    # Vérification structure conforme doc Paralos
-    if "candidat" not in data or "mandataire" not in data or "lp" not in data:
-        return jsonify({"error": "Structure invalide. Format attendu: candidat{}, mandataire{}, lp{}"}), 400
+    # Vérification structure conforme doc Paralos + comptage obligatoire
+    if "candidat" not in data or "mandataire" not in data or "lp" not in data or "comptage" not in data:
+        return jsonify({"error": "Structure invalide. Format attendu: candidat{}, mandataire{}, lp{}, comptage{}"}), 400
 
     candidat = data["candidat"]
     mandataire = data["mandataire"]
     lp = data["lp"]
+    comptage = data["comptage"]
 
+    # Champs requis
     required_candidat = ["nom", "prenom", "id_paralos", "adresse", "cp", "ville", "tel1", "email"]
     required_mandataire = ["nom", "prenom", "adresse", "cp", "ville", "tel1", "email"]
     required_lp = ["lien_photo", "lien_pf", "lien_bv"]
+    required_comptage = ["total", "geo_selection", "age_min", "age_max"]
 
     for field in required_candidat:
         if field not in candidat:
@@ -153,11 +156,21 @@ def commande():
         if field not in lp:
             return jsonify({"error": f"Missing champ lp.{field}"}), 400
 
+    for field in required_comptage:
+        if field not in comptage:
+            return jsonify({"error": f"Missing champ comptage.{field}"}), 400
+
+    # Validation comptage.total
+    total_contacts = int(comptage["total"])
+    if total_contacts <= 0:
+        return jsonify({"error": "comptage.total doit être supérieur à 0"}), 400
+
     commande_id = str(uuid.uuid4())
 
     return jsonify({
         "commande_id": commande_id,
         "statut": "reçue",
+        "total_contacts": total_contacts,
         "details": {
             "candidat": {
                 "nom": candidat["nom"],
@@ -168,9 +181,11 @@ def commande():
                 "nom": mandataire["nom"],
                 "prenom": mandataire["prenom"]
             },
-            "lp": lp
+            "lp": lp,
+            "comptage": comptage
         }
     })
+
 
 
 if __name__ == "__main__":
