@@ -38,57 +38,56 @@ def test_redshift():
         return jsonify({"status": "error ❌", "message": str(e)})
     
 
-from flask import Flask, request, jsonify
-import psycopg2
-import os
-
-# ... ton app existant ...
-
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json() or {}
 
-    # Récupère les listes (attendues comme arrays). Si absent -> None
-    communes = data.get("code_commune")
-    bdvs = data.get("code_bdv")
-    circos = data.get("code_circo")
-
-    # Age par défaut si absent
+    geo_selection = data.get("geo_selection", [])
     age_min = int(data.get("age_min", 18))
     age_max = int(data.get("age_max", 120))
 
-    # Validation minimale : au moins une des 3 listes doit être fournie et non vide
-    provided = []
-    if communes:
-        if not isinstance(communes, list) or len(communes) == 0:
-            return jsonify({"error": "code_commune must be a non-empty array if provided"}), 400
-        provided.append(("code_commune", communes))
-    if bdvs:
-        if not isinstance(bdvs, list) or len(bdvs) == 0:
-            return jsonify({"error": "code_bdv must be a non-empty array if provided"}), 400
-        provided.append(("code_bdv", bdvs))
-    if circos:
-        if not isinstance(circos, list) or len(circos) == 0:
-            return jsonify({"error": "code_circo must be a non-empty array if provided"}), 400
-        provided.append(("code_circo", circos))
+    if not isinstance(geo_selection, list) or len(geo_selection) == 0:
+        return jsonify({"error": "geo_selection must be a non-empty array"}), 400
 
-    if not provided:
-        return jsonify({"error": "Provide at least one of: code_commune, code_bdv, code_circo (arrays)"}), 400
+    code_bdv_list = []
+    code_commune_list = []
+    code_circo_list = []
 
-    # Construction sécurisée du WHERE (IN ...) avec paramètres
-    where_parts = []
+    # Détection automatique selon le prefixe
+    for code in geo_selection:
+        if code.startswith("BV"):  # Bureau de vote
+            code_bdv_list.append(code)
+        elif code.startswith("COM"):  # Commune
+            code_commune_list.append(code.replace("COM", ""))  # On retire "COM"
+        elif code.startswith("C"):  # Circonscription (ex: C01005)
+            code_circo_list.append(code.replace("C", ""))  # On retire "C"
+        else:
+            print(f"⚠ Code non reconnu: {code}")
+
     params = []
+    where_parts = []
 
-    for col, codes in provided:
-        placeholders = ", ".join(["%s"] * len(codes))
-        where_parts.append(f"{col} IN ({placeholders})")
-        params.extend(codes)
+    if code_bdv_list:
+        placeholders = ", ".join(["%s"] * len(code_bdv_list))
+        where_parts.append(f"code_bdv IN ({placeholders})")
+        params.extend(code_bdv_list)
 
-    # joint les clauses par OR et entoure de parenthèses
+    if code_commune_list:
+        placeholders = ", ".join(["%s"] * len(code_commune_list))
+        where_parts.append(f"code_commune IN ({placeholders})")
+        params.extend(code_commune_list)
+
+    if code_circo_list:
+        placeholders = ", ".join(["%s"] * len(code_circo_list))
+        where_parts.append(f"code_circo IN ({placeholders})")
+        params.extend(code_circo_list)
+
+    if not where_parts:
+        return jsonify({"error": "Aucun identifiant géographique valide dans geo_selection"}), 400
+
     where_geo = " OR ".join(where_parts)
     where_geo = f"({where_geo})"
 
-    # ajoute les bornes d'age
     params.append(age_min)
     params.append(age_max)
 
@@ -98,10 +97,6 @@ def ciblage():
         WHERE {where_geo}
         AND age BETWEEN %s AND %s;
     """
-
-    # (optionnel) log de debug (dans tes logs Qoddi)
-    print("DEBUG SQL:", query)
-    print("DEBUG PARAMS:", params)
 
     try:
         conn = psycopg2.connect(
@@ -122,40 +117,41 @@ def ciblage():
             "count": count,
             "age_min": age_min,
             "age_max": age_max,
-            "filters": {
-                "code_commune": communes or [],
-                "code_bdv": bdvs or [],
-                "code_circo": circos or []
-            }
+            "geo_selection_received": geo_selection
         })
     except Exception as e:
-        # log server-side pour debug
         print("ERROR executing ciblage query:", str(e))
         return jsonify({"status": "error ❌", "message": str(e)}), 500
+
 
 
 @app.route("/commande", methods=["POST"])
 def commande():
     data = request.get_json()
 
-    required_fields = [
-        # Candidat
-        "candidat_nom", "candidat_prenom", "candidat_id_paralos",
-        "candidat_adresse", "candidat_cp", "candidat_ville",
-        "candidat_tel1", "candidat_email",
-        # Mandataire
-        "mandataire_nom", "mandataire_prenom",
-        "mandataire_adresse", "mandataire_cp", "mandataire_ville",
-        "mandataire_tel1", "mandataire_email",
-        # LP
-        "lp_active", "type_lp", "photo_url", "profession_de_foi_url", "bulletin_url",
-        # Tarification
-        "nombre_contacts", "sms_count", "prix_total"
-    ]
+    # Vérification structure conforme doc Paralos
+    if "candidat" not in data or "mandataire" not in data or "lp" not in data:
+        return jsonify({"error": "Structure invalide. Format attendu: candidat{}, mandataire{}, lp{}"}), 400
 
-    missing_fields = [f for f in required_fields if f not in data]
-    if missing_fields:
-        return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
+    candidat = data["candidat"]
+    mandataire = data["mandataire"]
+    lp = data["lp"]
+
+    required_candidat = ["nom", "prenom", "id_paralos", "adresse", "cp", "ville", "tel1", "email"]
+    required_mandataire = ["nom", "prenom", "adresse", "cp", "ville", "tel1", "email"]
+    required_lp = ["lien_photo", "lien_pf", "lien_bv"]
+
+    for field in required_candidat:
+        if field not in candidat:
+            return jsonify({"error": f"Missing champ candidat.{field}"}), 400
+
+    for field in required_mandataire:
+        if field not in mandataire:
+            return jsonify({"error": f"Missing champ mandataire.{field}"}), 400
+
+    for field in required_lp:
+        if field not in lp:
+            return jsonify({"error": f"Missing champ lp.{field}"}), 400
 
     commande_id = str(uuid.uuid4())
 
@@ -164,24 +160,18 @@ def commande():
         "statut": "reçue",
         "details": {
             "candidat": {
-                "nom": data["candidat_nom"],
-                "prenom": data["candidat_prenom"]
+                "nom": candidat["nom"],
+                "prenom": candidat["prenom"],
+                "id_paralos": candidat["id_paralos"]
             },
             "mandataire": {
-                "nom": data["mandataire_nom"],
-                "prenom": data["mandataire_prenom"]
+                "nom": mandataire["nom"],
+                "prenom": mandataire["prenom"]
             },
-            "lp": {
-                "active": data["lp_active"],
-                "type_lp": data["type_lp"]
-            },
-            "tarification": {
-                "contacts": data["nombre_contacts"],
-                "sms": data["sms_count"],
-                "prix": data["prix_total"]
-            }
+            "lp": lp
         }
     })
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8002))  # valeur par défaut 8002 en local
