@@ -3,11 +3,7 @@ from flask_cors import CORS
 import os
 import uuid
 import psycopg2
-import json
-from datetime import datetime
 
-COMMANDES_LOG_FILE = "commandes_log.jsonl"  # format JSON Lines (.jsonl)
-CIBLAGES_LOG_FILE = "ciblages_log.jsonl"  # format JSON Lines (.jsonl)
 
 API_KEY = os.getenv("API_KEY")
 
@@ -116,26 +112,6 @@ def ciblage():
                 result = cur.fetchone()
                 count = result[0] if result else 0
 
-        # --- Enregistrement local du ciblage dans un fichier JSONL ---
-        log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "endpoint": "/ciblage",
-            "status": "success ✅",
-            "count": count,
-            "age_min": age_min,
-            "age_max": age_max,
-            "geo_selection": geo_selection,
-            "sql_query": query.strip()
-        }
-
-        try:
-            with open(CIBLAGES_LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-            print(f"🪵 Log ciblage ajouté avec succès ({len(geo_selection)} codes)")
-        except Exception as e:
-            print("⚠️ Erreur d'écriture du log ciblage :", str(e))
-
-
         return jsonify({
             "status": "success ✅",
             "count": count,
@@ -190,26 +166,6 @@ def commande():
         return jsonify({"error": "comptage.total doit être supérieur à 0"}), 400
 
     commande_id = str(uuid.uuid4())
-
-        # --- Enregistrement local de la commande dans un fichier JSONL ---
-    log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "commande_id": commande_id,
-        "statut": "reçue",
-        "total_contacts": total_contacts,
-        "candidat": candidat,
-        "mandataire": mandataire,
-        "lp": lp,
-        "comptage": comptage
-    }
-
-    try:
-        with open(COMMANDES_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-        print(f"🪵 Log ajouté pour la commande {commande_id}")
-    except Exception as e:
-        print("⚠️ Erreur d'écriture du log local :", str(e))
-
 
     return jsonify({
         "commande_id": commande_id,
