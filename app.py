@@ -138,6 +138,12 @@ def commande():
     lp = data["lp"]
     comptage = data["comptage"]
 
+    # Nouveaux champs
+    dry_run = bool(data.get("dry_run", False))
+    coverage = float(data.get("coverage", 1.0))  # Par défaut 100%
+    if not (0 <= coverage <= 1):
+        return jsonify({"error": "coverage doit être compris entre 0 et 1"}), 400
+
     # Champs requis
     required_candidat = ["nom", "prenom", "id_paralos", "adresse", "cp", "ville", "tel1", "email"]
     required_mandataire = ["nom", "prenom", "adresse", "cp", "ville", "tel1", "email"]
@@ -165,12 +171,18 @@ def commande():
     if total_contacts <= 0:
         return jsonify({"error": "comptage.total doit être supérieur à 0"}), 400
 
+    # Application du coverage
+    selected_contacts = int(total_contacts * coverage)
+
     commande_id = str(uuid.uuid4())
 
     return jsonify({
         "commande_id": commande_id,
-        "statut": "reçue",
+        "statut": "reçue" if not dry_run else "simulation",
+        "dry_run": dry_run,
+        "coverage": coverage,
         "total_contacts": total_contacts,
+        "contacts_utilisés": selected_contacts,
         "details": {
             "candidat": {
                 "nom": candidat["nom"],
@@ -185,6 +197,7 @@ def commande():
             "comptage": comptage
         }
     })
+
 
 
 
