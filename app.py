@@ -56,7 +56,7 @@ def ciblage():
     # Détection automatique selon le prefixe
     for code in geo_selection:
         if code.startswith("BV"):  # Bureau de vote
-            code_bdv_list.append(code)
+            code_bdv_list.append(code.replace("BV", ""))  # Retire BV
         elif code.startswith("COM"):  # Commune
             code_commune_list.append(code.replace("COM", ""))  # On retire "COM"
         elif code.startswith("C"):  # Circonscription (ex: C01005)
