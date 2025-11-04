@@ -98,6 +98,8 @@ def ciblage():
         AND age BETWEEN %s AND %s;
     """
 
+    print(query)
+
     try:
         conn = psycopg2.connect(
             dbname=os.getenv("REDSHIFT_DBNAME"),
