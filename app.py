@@ -2,45 +2,65 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os, uuid, psycopg2
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
+# ------------------- CHARGEMENT DES VARIABLES ENV -------------------
 API_KEY = os.getenv("API_KEY")
 
-# ---------------- GOOGLE SHEETS CONFIGURATION (retardée) ---------------- #
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-SERVICE_ACCOUNT_INFO = {
-    "type": os.getenv("TYPE"),
-    "project_id": os.getenv("PROJECT_ID"),
-    "private_key_id": os.getenv("PRIVATE_KEY_ID"),
-    "private_key": os.getenv("PRIVATE_KEY", "").replace("\\n", "\n"),
-    "client_email": os.getenv("CLIENT_EMAIL"),
-    "client_id": os.getenv("CLIENT_ID"),
-    "auth_uri": os.getenv("AUTH_URI"),
-    "token_uri": os.getenv("TOKEN_URI"),
-    "auth_provider_x509_cert_url": os.getenv("AUTH_PROVIDER_X509_CERT_URL"),
-}
+# Variables Google Service Account
+TYPE = os.getenv("TYPE")
+PROJECT_ID = os.getenv("PROJECT_ID")
+PRIVATE_KEY_ID = os.getenv("PRIVATE_KEY_ID")
+PRIVATE_KEY = os.getenv("PRIVATE_KEY", "").replace("\\n", "\n")
+CLIENT_EMAIL = os.getenv("CLIENT_EMAIL")
+CLIENT_ID = os.getenv("CLIENT_ID")
+AUTH_URI = os.getenv("AUTH_URI")
+TOKEN_URI = os.getenv("TOKEN_URI")
+AUTH_PROVIDER_X509_CERT_URL = os.getenv("AUTH_PROVIDER_X509_CERT_URL")
+CLIENT_X509_CERT_URL = os.getenv("CLIENT_X509_CERT_URL")
+
 SHEET_ID = os.getenv("SHEET_ID")
 WS_COMPTAGES_NAME = os.getenv("WS_COMPTAGES_NAME", "Comptages")
 WS_COMMANDES_NAME = os.getenv("WS_COMMANDES_NAME", "Commandes")
 
-def get_sheet():
-    """Crée une connexion Google Sheets à la demande"""
+# ------------------- GOOGLE SHEETS CONFIGURATION -------------------
+def get_google_client():
+    """Initialise le client gspread à la demande."""
     try:
-        creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
-        gclient = gspread.authorize(creds)
-        sheet = gclient.open_by_key(SHEET_ID)
+        scope = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+
+        creds_dict = {
+            "type": TYPE,
+            "project_id": PROJECT_ID,
+            "private_key_id": PRIVATE_KEY_ID,
+            "private_key": PRIVATE_KEY,
+            "client_email": CLIENT_EMAIL,
+            "client_id": CLIENT_ID,
+            "auth_uri": AUTH_URI,
+            "token_uri": TOKEN_URI,
+            "auth_provider_x509_cert_url": AUTH_PROVIDER_X509_CERT_URL,
+            "client_x509_cert_url": CLIENT_X509_CERT_URL
+        }
+
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SHEET_ID)
+        print("✅ Connexion Google Sheets OK", flush=True)
         return sheet
     except Exception as e:
         print("❌ Erreur connexion Google Sheets :", e, flush=True)
         return None
-# ------------------------------------------------------------------------- #
+# -------------------------------------------------------------------
 
 
-# ---------------- AUTHENTIFICATION ---------------- #
+# ------------------- AUTHENTIFICATION -------------------
 @app.before_request
 def authenticate():
     if request.path.startswith(("/ciblage", "/commande")):
@@ -49,7 +69,7 @@ def authenticate():
             return jsonify({"error": "Unauthorized"}), 401
 
 
-# ---------------- TEST REDSHIFT ---------------- #
+# ------------------- TEST REDSHIFT -------------------
 @app.route("/test-redshift")
 def test_redshift():
     try:
@@ -58,7 +78,7 @@ def test_redshift():
             user=os.getenv("REDSHIFT_USER"),
             password=os.getenv("REDSHIFT_PASSWORD"),
             host=os.getenv("REDSHIFT_HOST"),
-            port=os.getenv("REDSHIFT_PORT", 5439),
+            port=os.getenv("REDSHIFT_PORT", 5439)
         )
         cur = conn.cursor()
         cur.execute("SELECT current_date;")
@@ -70,7 +90,7 @@ def test_redshift():
         return jsonify({"status": "error ❌", "message": str(e)})
 
 
-# ---------------- ROUTE CIBLAGE ---------------- #
+# ------------------- ROUTE CIBLAGE -------------------
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json() or {}
@@ -81,6 +101,7 @@ def ciblage():
     if not isinstance(geo_selection, list) or not geo_selection:
         return jsonify({"error": "geo_selection must be a non-empty array"}), 400
 
+    # Détection des types de codes
     code_bdv_list, code_commune_list, code_circo_list = [], [], []
     for code in geo_selection:
         if code.startswith("BV"):
@@ -107,7 +128,7 @@ def ciblage():
         params.extend(code_circo_list)
 
     if not where_parts:
-        return jsonify({"error": "Aucun identifiant géographique valide dans geo_selection"}), 400
+        return jsonify({"error": "Aucun identifiant géographique valide"}), 400
 
     where_geo = f"({' OR '.join(where_parts)})"
     params.extend([age_min, age_max])
@@ -127,6 +148,7 @@ def ciblage():
             host=os.getenv("REDSHIFT_HOST"),
             port=int(os.getenv("REDSHIFT_PORT", 5439)),
         )
+
         with conn:
             with conn.cursor() as cur:
                 print("SQL FINAL :", cur.mogrify(query, tuple(params)).decode(), flush=True)
@@ -135,43 +157,36 @@ def ciblage():
                 count = result[0] if result else 0
                 print(f"✅ Résultat du comptage : {count}", flush=True)
 
-        # --- Ajout à Google Sheets (connexion à la demande) ---
-        sheet = get_sheet()
+        # 🔹 Ajout au Google Sheet
+        sheet = get_google_client()
         if sheet:
             try:
                 ws = sheet.worksheet(WS_COMPTAGES_NAME)
-                ws.append_row(
-                    [
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        str(geo_selection),
-                        age_min,
-                        age_max,
-                        count,
-                    ]
-                )
-                print("✅ Comptage ajouté à Google Sheet avec succès.", flush=True)
+                ws.append_row([
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    str(geo_selection),
+                    age_min,
+                    age_max,
+                    count
+                ])
+                print("✅ Comptage ajouté au Google Sheet.", flush=True)
             except Exception as sheet_error:
-                print("❌ Erreur écriture Google Sheet :", sheet_error, flush=True)
-        else:
-            print("⚠ Google Sheet non disponible.", flush=True)
-        # ------------------------------------------------------
+                print("❌ Erreur ajout Google Sheet :", sheet_error, flush=True)
 
-        return jsonify(
-            {
-                "status": "success ✅",
-                "count": count,
-                "age_min": age_min,
-                "age_max": age_max,
-                "geo_selection_received": geo_selection,
-            }
-        )
+        return jsonify({
+            "status": "success ✅",
+            "count": count,
+            "age_min": age_min,
+            "age_max": age_max,
+            "geo_selection_received": geo_selection
+        })
 
     except Exception as e:
-        print("ERROR Redshift :", str(e), flush=True)
+        print("❌ Erreur Redshift :", str(e), flush=True)
         return jsonify({"status": "error ❌", "message": str(e)}), 500
 
 
-# ---------------- MAIN ---------------- #
+# ------------------- MAIN -------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8002))
     app.run(host="0.0.0.0", port=port, debug=True)

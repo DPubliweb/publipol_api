@@ -1,7 +1,5 @@
-flask
+Flask
 flask-cors
 psycopg2-binary
 gspread
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
+oauth2client
