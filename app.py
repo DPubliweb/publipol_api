@@ -32,9 +32,9 @@ try:
     creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
     gclient = gspread.authorize(creds)
     sheet = gclient.open_by_key(SHEET_ID)
-    print("✅ Connexion Google Sheet établie avec succès.")
+    print("✅ Connexion Google Sheet établie avec succès.", flush=True)
 except Exception as e:
-    print("❌ Erreur connexion Google Sheets:", e)
+    print("❌ Erreur connexion Google Sheets:", e, flush=True)
 # -------------------------------------------------------------- #
 
 
@@ -89,7 +89,7 @@ def ciblage():
         elif code.startswith("C"):
             code_circo_list.append(code.replace("C", ""))
         else:
-            print(f"⚠ Code non reconnu: {code}")
+            print(f"⚠ Code non reconnu: {code}", flush=True)
 
     params, where_parts = [], []
     if code_bdv_list:
@@ -131,11 +131,11 @@ def ciblage():
         with conn:
             with conn.cursor() as cur:
                 # 💡 Affiche la requête complète avec les vraies valeurs
-                print("SQL FINAL:", cur.mogrify(query, tuple(params)).decode())
-
+                print("SQL FINAL:", cur.mogrify(query, tuple(params)).decode(), flush=True)
                 cur.execute(query, tuple(params))
                 result = cur.fetchone()
                 count = result[0] if result else 0
+                print(f"✅ Résultat du comptage: {count}", flush=True)
 
         # ✅ Debug Google Sheets
         try:
@@ -147,9 +147,9 @@ def ciblage():
                 age_max,
                 count
             ])
-            print("✅ Comptage ajouté à Google Sheet avec succès.")
+            print("✅ Comptage ajouté à Google Sheet avec succès.", flush=True)
         except Exception as sheet_error:
-            print("❌ Erreur écriture Google Sheet:", sheet_error)
+            print("❌ Erreur écriture Google Sheet:", sheet_error, flush=True)
 
         return jsonify({
             "status": "success ✅",
@@ -160,7 +160,7 @@ def ciblage():
         })
 
     except Exception as e:
-        print("ERROR Redshift:", str(e))
+        print("ERROR Redshift:", str(e), flush=True)
         return jsonify({"status": "error ❌", "message": str(e)}), 500
 
 
