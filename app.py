@@ -10,39 +10,41 @@ CORS(app)
 
 API_KEY = os.getenv("API_KEY")
 
-# ---------------- GOOGLE SHEETS CONFIGURATION ---------------- #
-try:
-    SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-    SERVICE_ACCOUNT_INFO = {
-        "type": os.getenv("TYPE"),
-        "project_id": os.getenv("PROJECT_ID"),
-        "private_key_id": os.getenv("PRIVATE_KEY_ID"),
-        "private_key": os.getenv("PRIVATE_KEY").replace("\\n", "\n"),
-        "client_email": os.getenv("CLIENT_EMAIL"),
-        "client_id": os.getenv("CLIENT_ID"),
-        "auth_uri": os.getenv("AUTH_URI"),
-        "token_uri": os.getenv("TOKEN_URI"),
-        "auth_provider_x509_cert_url": os.getenv("AUTH_PROVIDER_X509_CERT_URL"),
-    }
+# ---------------- GOOGLE SHEETS CONFIGURATION (retardée) ---------------- #
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+SERVICE_ACCOUNT_INFO = {
+    "type": os.getenv("TYPE"),
+    "project_id": os.getenv("PROJECT_ID"),
+    "private_key_id": os.getenv("PRIVATE_KEY_ID"),
+    "private_key": os.getenv("PRIVATE_KEY", "").replace("\\n", "\n"),
+    "client_email": os.getenv("CLIENT_EMAIL"),
+    "client_id": os.getenv("CLIENT_ID"),
+    "auth_uri": os.getenv("AUTH_URI"),
+    "token_uri": os.getenv("TOKEN_URI"),
+    "auth_provider_x509_cert_url": os.getenv("AUTH_PROVIDER_X509_CERT_URL"),
+}
+SHEET_ID = os.getenv("SHEET_ID")
+WS_COMPTAGES_NAME = os.getenv("WS_COMPTAGES_NAME", "Comptages")
+WS_COMMANDES_NAME = os.getenv("WS_COMMANDES_NAME", "Commandes")
 
-    SHEET_ID = os.getenv("SHEET_ID")
-    WS_COMPTAGES_NAME = os.getenv("WS_COMPTAGES_NAME", "Comptages")
-    WS_COMMANDES_NAME = os.getenv("WS_COMMANDES_NAME", "Commandes")
-
-    creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
-    gclient = gspread.authorize(creds)
-    sheet = gclient.open_by_key(SHEET_ID)
-    print("✅ Connexion Google Sheet établie avec succès.", flush=True)
-except Exception as e:
-    print("❌ Erreur connexion Google Sheets:", e, flush=True)
-# -------------------------------------------------------------- #
+def get_sheet():
+    """Crée une connexion Google Sheets à la demande"""
+    try:
+        creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
+        gclient = gspread.authorize(creds)
+        sheet = gclient.open_by_key(SHEET_ID)
+        return sheet
+    except Exception as e:
+        print("❌ Erreur connexion Google Sheets :", e, flush=True)
+        return None
+# ------------------------------------------------------------------------- #
 
 
 # ---------------- AUTHENTIFICATION ---------------- #
 @app.before_request
 def authenticate():
-    if request.path.startswith('/ciblage') or request.path.startswith('/commande'):
-        api_key = request.headers.get('x-api-key')
+    if request.path.startswith(("/ciblage", "/commande")):
+        api_key = request.headers.get("x-api-key")
         if api_key != API_KEY:
             return jsonify({"error": "Unauthorized"}), 401
 
@@ -56,7 +58,7 @@ def test_redshift():
             user=os.getenv("REDSHIFT_USER"),
             password=os.getenv("REDSHIFT_PASSWORD"),
             host=os.getenv("REDSHIFT_HOST"),
-            port=os.getenv("REDSHIFT_PORT", 5439)
+            port=os.getenv("REDSHIFT_PORT", 5439),
         )
         cur = conn.cursor()
         cur.execute("SELECT current_date;")
@@ -76,10 +78,9 @@ def ciblage():
     age_min = int(data.get("age_min", 18))
     age_max = int(data.get("age_max", 120))
 
-    if not isinstance(geo_selection, list) or len(geo_selection) == 0:
+    if not isinstance(geo_selection, list) or not geo_selection:
         return jsonify({"error": "geo_selection must be a non-empty array"}), 400
 
-    # --- Détection automatique du type de code ---
     code_bdv_list, code_commune_list, code_circo_list = [], [], []
     for code in geo_selection:
         if code.startswith("BV"):
@@ -89,7 +90,7 @@ def ciblage():
         elif code.startswith("C"):
             code_circo_list.append(code.replace("C", ""))
         else:
-            print(f"⚠ Code non reconnu: {code}", flush=True)
+            print(f"⚠ Code non reconnu : {code}", flush=True)
 
     params, where_parts = [], []
     if code_bdv_list:
@@ -108,8 +109,7 @@ def ciblage():
     if not where_parts:
         return jsonify({"error": "Aucun identifiant géographique valide dans geo_selection"}), 400
 
-    where_geo = " OR ".join(where_parts)
-    where_geo = f"({where_geo})"
+    where_geo = f"({' OR '.join(where_parts)})"
     params.extend([age_min, age_max])
 
     query = f"""
@@ -125,42 +125,49 @@ def ciblage():
             user=os.getenv("REDSHIFT_USER"),
             password=os.getenv("REDSHIFT_PASSWORD"),
             host=os.getenv("REDSHIFT_HOST"),
-            port=int(os.getenv("REDSHIFT_PORT", 5439))
+            port=int(os.getenv("REDSHIFT_PORT", 5439)),
         )
-
         with conn:
             with conn.cursor() as cur:
-                # 💡 Affiche la requête complète avec les vraies valeurs
-                print("SQL FINAL:", cur.mogrify(query, tuple(params)).decode(), flush=True)
+                print("SQL FINAL :", cur.mogrify(query, tuple(params)).decode(), flush=True)
                 cur.execute(query, tuple(params))
                 result = cur.fetchone()
                 count = result[0] if result else 0
-                print(f"✅ Résultat du comptage: {count}", flush=True)
+                print(f"✅ Résultat du comptage : {count}", flush=True)
 
-        # ✅ Debug Google Sheets
-        try:
-            ws = sheet.worksheet(WS_COMPTAGES_NAME)
-            ws.append_row([
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                str(geo_selection),
-                age_min,
-                age_max,
-                count
-            ])
-            print("✅ Comptage ajouté à Google Sheet avec succès.", flush=True)
-        except Exception as sheet_error:
-            print("❌ Erreur écriture Google Sheet:", sheet_error, flush=True)
+        # --- Ajout à Google Sheets (connexion à la demande) ---
+        sheet = get_sheet()
+        if sheet:
+            try:
+                ws = sheet.worksheet(WS_COMPTAGES_NAME)
+                ws.append_row(
+                    [
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        str(geo_selection),
+                        age_min,
+                        age_max,
+                        count,
+                    ]
+                )
+                print("✅ Comptage ajouté à Google Sheet avec succès.", flush=True)
+            except Exception as sheet_error:
+                print("❌ Erreur écriture Google Sheet :", sheet_error, flush=True)
+        else:
+            print("⚠ Google Sheet non disponible.", flush=True)
+        # ------------------------------------------------------
 
-        return jsonify({
-            "status": "success ✅",
-            "count": count,
-            "age_min": age_min,
-            "age_max": age_max,
-            "geo_selection_received": geo_selection
-        })
+        return jsonify(
+            {
+                "status": "success ✅",
+                "count": count,
+                "age_min": age_min,
+                "age_max": age_max,
+                "geo_selection_received": geo_selection,
+            }
+        )
 
     except Exception as e:
-        print("ERROR Redshift:", str(e), flush=True)
+        print("ERROR Redshift :", str(e), flush=True)
         return jsonify({"status": "error ❌", "message": str(e)}), 500
 
 
