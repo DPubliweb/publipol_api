@@ -1,9 +1,11 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os, uuid, psycopg2
+import os, uuid, psycopg2, smtplib
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 CORS(app)
@@ -11,6 +13,7 @@ CORS(app)
 # ------------------- VARIABLES ENV -------------------
 API_KEY = os.getenv("API_KEY")
 
+# Google service account pieces (env variables)
 TYPE = os.getenv("TYPE")
 PROJECT_ID = os.getenv("PROJECT_ID")
 PRIVATE_KEY_ID = os.getenv("PRIVATE_KEY_ID")
@@ -26,8 +29,14 @@ SHEET_ID = os.getenv("SHEET_ID")
 WS_COMPTAGES_NAME = os.getenv("WS_COMPTAGES_NAME", "Comptages")
 WS_COMMANDES_NAME = os.getenv("WS_COMMANDES_NAME", "Commandes")
 
+# Email (Gmail SMTP)
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # mot de passe d'application Gmail
+EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")  # peut être plusieurs séparées par ','
+
 # ------------------- GOOGLE SHEETS -------------------
 def get_google_client():
+    """Initialise le client gspread à la demande."""
     try:
         scope = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -47,7 +56,9 @@ def get_google_client():
         }
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        return client.open_by_key(SHEET_ID)
+        sheet = client.open_by_key(SHEET_ID)
+        print("✅ Connexion Google Sheets OK", flush=True)
+        return sheet
     except Exception as e:
         print("❌ Erreur connexion Google Sheets :", e, flush=True)
         return None
@@ -55,6 +66,7 @@ def get_google_client():
 # ------------------- AUTH -------------------
 @app.before_request
 def authenticate():
+    # Appliquer à /ciblage et /commande (comme avant)
     if request.path.startswith(("/ciblage", "/commande")):
         api_key = request.headers.get("x-api-key")
         if api_key != API_KEY:
@@ -76,7 +88,7 @@ def test_redshift():
         result = cur.fetchone()
         cur.close()
         conn.close()
-        return jsonify({"status": "success ✅", "current_date": result[0]})
+        return jsonify({"status": "success ✅", "current_date": str(result[0])})
     except Exception as e:
         return jsonify({"status": "error ❌", "message": str(e)})
 
@@ -136,12 +148,17 @@ def ciblage():
         )
         with conn:
             with conn.cursor() as cur:
-                print("SQL FINAL :", cur.mogrify(query, tuple(params)).decode(), flush=True)
+                # affiche la requête complétée pour debug
+                try:
+                    print("SQL FINAL :", cur.mogrify(query, tuple(params)).decode(), flush=True)
+                except Exception:
+                    print("SQL (mogrify non disponible)", flush=True)
                 cur.execute(query, tuple(params))
                 result = cur.fetchone()
                 count = result[0] if result else 0
                 print(f"✅ Résultat du comptage : {count}", flush=True)
 
+        # Ajouter le comptage au Google Sheet
         sheet = get_google_client()
         if sheet:
             try:
@@ -164,18 +181,38 @@ def ciblage():
             "age_max": age_max,
             "geo_selection_received": geo_selection
         })
+
     except Exception as e:
         print("❌ Erreur Redshift :", str(e), flush=True)
         return jsonify({"status": "error ❌", "message": str(e)}), 500
 
 # ------------------- COMMANDE -------------------
+def send_email(subject: str, body: str, sender: str, password: str, receivers: str):
+    """Envoie un email via Gmail SMTP SSL. `receivers` peut être une string avec virgules."""
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = sender
+        msg["To"] = receivers
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        # Connexion SMTP SSL Gmail
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, [r.strip() for r in receivers.split(",")], msg.as_string())
+        print("✅ Email envoyé via Gmail SMTP", flush=True)
+        return True
+    except Exception as e:
+        print("❌ Erreur envoi email :", e, flush=True)
+        return False
+
 @app.route("/commande", methods=["POST"])
 def commande():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Missing body"}), 400
 
-    # Vérifie la structure
+    # Validate minimal structure
     for key in ["candidat", "mandataire", "lp", "comptage"]:
         if key not in data:
             return jsonify({"error": f"Missing section: {key}"}), 400
@@ -209,7 +246,7 @@ def commande():
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 🔹 Écriture dans le Google Sheet
+    # Écriture dans le Google Sheet (Commandes)
     sheet = get_google_client()
     if sheet:
         try:
@@ -217,18 +254,50 @@ def commande():
             ws.append_row([
                 created_at,
                 commande_id,
-                candidat["nom"], candidat["prenom"],
-                mandataire["nom"], mandataire["prenom"],
+                candidat.get("nom"), candidat.get("prenom"),
+                mandataire.get("nom"), mandataire.get("prenom"),
                 total_contacts,
                 coverage,
                 dry_run,
-                str(comptage["geo_selection"]),
-                comptage["age_min"], comptage["age_max"],
-                lp["lien_photo"], lp["lien_pf"], lp["lien_bv"]
+                str(comptage.get("geo_selection")),
+                comptage.get("age_min"), comptage.get("age_max"),
+                lp.get("lien_photo"), lp.get("lien_pf"), lp.get("lien_bv"),
+                candidat.get("id_paralos")
             ])
             print("✅ Commande ajoutée au Google Sheet.", flush=True)
         except Exception as sheet_error:
             print("❌ Erreur ajout commande Sheet:", sheet_error, flush=True)
+
+    # Prépare et envoie l'email de notification
+    try:
+        receivers = EMAIL_RECEIVER or ""
+        subject = f"[Publipol] Nouvelle commande {commande_id} - {candidat.get('nom')} {candidat.get('prenom')}"
+        body = f"""
+Nouvelle commande reçue à {created_at}
+
+Commande ID : {commande_id}
+Candidat : {candidat.get('prenom')} {candidat.get('nom')} (ID Paralos : {candidat.get('id_paralos')})
+Mandataire : {mandataire.get('prenom')} {mandataire.get('nom')}
+Total contacts : {total_contacts}
+Coverage : {coverage}
+Dry run : {dry_run}
+Zone : {comptage.get('geo_selection')}
+Age : {comptage.get('age_min')} - {comptage.get('age_max')}
+
+Liens LP:
+- Photo: {lp.get('lien_photo')}
+- Profession de foi: {lp.get('lien_pf')}
+- Bulletin: {lp.get('lien_bv')}
+"""
+        # Envoi si on a sender/password/receivers
+        if EMAIL_SENDER and EMAIL_PASSWORD and receivers:
+            send_ok = send_email(subject, body, EMAIL_SENDER, EMAIL_PASSWORD, receivers)
+            if not send_ok:
+                print("⚠ Notification mail a échoué (voir logs).", flush=True)
+        else:
+            print("ℹ️ Email non envoyé : variables EMAIL_SENDER / EMAIL_PASSWORD / EMAIL_RECEIVER manquantes.", flush=True)
+    except Exception as e:
+        print("❌ Erreur préparation envoi email :", e, flush=True)
 
     return jsonify({
         "commande_id": commande_id,
