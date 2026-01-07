@@ -205,6 +205,49 @@ def send_email(subject: str, body: str, sender: str, password: str, receivers: s
     except Exception as e:
         print("❌ Erreur envoi email :", e, flush=True)
         return False
+    
+def normalize_commande_payload(data: dict) -> dict:
+    """
+    Accepte payload legacy OU nouveau payload Paralos
+    et retourne une structure normalisée
+    """
+    normalized = {}
+
+    normalized["candidat"] = data.get("candidat", {})
+    normalized["mandataire"] = data.get("mandataire", {})
+    normalized["lp"] = data.get("lp", {})
+
+    # --- total contacts ---
+    if "comptage" in data:
+        normalized["total_contacts"] = int(data["comptage"].get("total", 0))
+        normalized["geo_selection"] = data["comptage"].get("geo_selection", [])
+        normalized["age_min"] = data["comptage"].get("age_min")
+        normalized["age_max"] = data["comptage"].get("age_max")
+    elif "tarif" in data:
+        normalized["total_contacts"] = int(data["tarif"].get("contacts", 0))
+        normalized["geo_selection"] = data.get("geo_selection", [])
+        normalized["age_min"] = None
+        normalized["age_max"] = None
+    else:
+        normalized["total_contacts"] = 0
+        normalized["geo_selection"] = []
+
+    # --- coverage / dry run ---
+    normalized["coverage"] = float(data.get("coverage", 1.0))
+    normalized["dry_run"] = bool(
+        data.get("dry_run") or data.get("dry-run", False)
+    )
+
+    # --- liens LP ---
+    lp = normalized["lp"]
+    normalized["lp_links"] = {
+        "photo": lp.get("lien_photo"),
+        "pf": lp.get("lien_pf") or lp.get("lien_profession_de_foi"),
+        "bv": lp.get("lien_bv") or lp.get("lien_bulletin_vote"),
+    }
+
+    return normalized
+
 
 @app.route("/commande", methods=["POST"])
 def commande():
@@ -212,41 +255,24 @@ def commande():
     if not data:
         return jsonify({"error": "Missing body"}), 400
 
-    # Validate minimal structure
-    for key in ["candidat", "mandataire", "lp", "comptage"]:
-        if key not in data:
-            return jsonify({"error": f"Missing section: {key}"}), 400
+    payload = normalize_commande_payload(data)
 
-    candidat = data["candidat"]
-    mandataire = data["mandataire"]
-    lp = data["lp"]
-    comptage = data["comptage"]
+    candidat = payload["candidat"]
+    mandataire = payload["mandataire"]
+    lp_links = payload["lp_links"]
 
-    dry_run = bool(data.get("dry_run", False))
-    coverage = float(data.get("coverage", 1.0))
-    if not (0 <= coverage <= 1):
-        return jsonify({"error": "coverage doit être entre 0 et 1"}), 400
+    total_contacts = payload["total_contacts"]
+    geo_selection = payload["geo_selection"]
+    coverage = payload["coverage"]
+    dry_run = payload["dry_run"]
 
-    required_candidat = ["nom", "prenom", "id_paralos", "adresse", "cp", "ville", "tel1", "email"]
-    required_mandataire = ["nom", "prenom", "adresse", "cp", "ville", "tel1", "email"]
-    required_lp = ["lien_photo", "lien_pf", "lien_bv"]
-    required_comptage = ["total", "geo_selection", "age_min", "age_max"]
+    if not candidat or not mandataire:
+        return jsonify({"error": "Missing candidat or mandataire"}), 400
 
-    for section, fields in {
-        "candidat": required_candidat,
-        "mandataire": required_mandataire,
-        "lp": required_lp,
-        "comptage": required_comptage
-    }.items():
-        for f in fields:
-            if f not in data[section]:
-                return jsonify({"error": f"Missing field {section}.{f}"}), 400
-
-    total_contacts = int(comptage["total"])
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Écriture dans le Google Sheet (Commandes)
+    # ------------------- GOOGLE SHEET -------------------
     sheet = get_google_client()
     if sheet:
         try:
@@ -259,58 +285,45 @@ def commande():
                 total_contacts,
                 coverage,
                 dry_run,
-                str(comptage.get("geo_selection")),
-                comptage.get("age_min"), comptage.get("age_max"),
-                lp.get("lien_photo"), lp.get("lien_pf"), lp.get("lien_bv"),
+                str(geo_selection),
+                lp_links["photo"],
+                lp_links["pf"],
+                lp_links["bv"],
                 candidat.get("id_paralos")
             ])
             print("✅ Commande ajoutée au Google Sheet.", flush=True)
-        except Exception as sheet_error:
-            print("❌ Erreur ajout commande Sheet:", sheet_error, flush=True)
+        except Exception as e:
+            print("❌ Erreur Google Sheet :", e, flush=True)
 
-    # Prépare et envoie l'email de notification
-    try:
-        receivers = EMAIL_RECEIVER or ""
-        subject = f"[Publipol] Nouvelle commande {commande_id} - {candidat.get('nom')} {candidat.get('prenom')}"
-        body = f"""
-Nouvelle commande reçue à {created_at}
+    # ------------------- EMAIL -------------------
+    subject = f"[Publipol] Commande {commande_id} – {candidat.get('prenom')} {candidat.get('nom')}"
+    body = f"""
+Nouvelle commande reçue
 
-Commande ID : {commande_id}
-Candidat : {candidat.get('prenom')} {candidat.get('nom')} (ID Paralos : {candidat.get('id_paralos')})
+ID : {commande_id}
+Candidat : {candidat.get('prenom')} {candidat.get('nom')}
 Mandataire : {mandataire.get('prenom')} {mandataire.get('nom')}
-Total contacts : {total_contacts}
+Contacts : {total_contacts}
 Coverage : {coverage}
-Dry run : {dry_run}
-Zone : {comptage.get('geo_selection')}
-Age : {comptage.get('age_min')} - {comptage.get('age_max')}
+Dry-run : {dry_run}
+
+Zones : {geo_selection}
 
 Liens LP:
-- Photo: {lp.get('lien_photo')}
-- Profession de foi: {lp.get('lien_pf')}
-- Bulletin: {lp.get('lien_bv')}
+- Photo : {lp_links['photo']}
+- Profession de foi : {lp_links['pf']}
+- Bulletin : {lp_links['bv']}
 """
-        # Envoi si on a sender/password/receivers
-        if EMAIL_SENDER and EMAIL_PASSWORD and receivers:
-            send_ok = send_email(subject, body, EMAIL_SENDER, EMAIL_PASSWORD, receivers)
-            if not send_ok:
-                print("⚠ Notification mail a échoué (voir logs).", flush=True)
-        else:
-            print("ℹ️ Email non envoyé : variables EMAIL_SENDER / EMAIL_PASSWORD / EMAIL_RECEIVER manquantes.", flush=True)
-    except Exception as e:
-        print("❌ Erreur préparation envoi email :", e, flush=True)
+
+    if EMAIL_SENDER and EMAIL_PASSWORD and EMAIL_RECEIVER:
+        send_email(subject, body, EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECEIVER)
 
     return jsonify({
         "commande_id": commande_id,
-        "statut": "reçue",
-        "dry_run": dry_run,
-        "coverage": coverage,
-        "details": {
-            "candidat": candidat,
-            "mandataire": mandataire,
-            "lp": lp,
-            "comptage": comptage
-        }
+        "status": "ok",
+        "normalized": payload
     })
+
 
 # ------------------- MAIN -------------------
 if __name__ == "__main__":
