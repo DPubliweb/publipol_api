@@ -34,13 +34,14 @@ EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")  # mot de passe d'application Gmail
 EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")  # peut être plusieurs séparées par ','
 
+
 # ------------------- GOOGLE SHEETS -------------------
 def get_google_client():
     """Initialise le client gspread à la demande."""
     try:
         scope = [
             "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
+            "https://www.googleapis.com/auth/drive",
         ]
         creds_dict = {
             "type": TYPE,
@@ -52,7 +53,7 @@ def get_google_client():
             "auth_uri": AUTH_URI,
             "token_uri": TOKEN_URI,
             "auth_provider_x509_cert_url": AUTH_PROVIDER_X509_CERT_URL,
-            "client_x509_cert_url": CLIENT_X509_CERT_URL
+            "client_x509_cert_url": CLIENT_X509_CERT_URL,
         }
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
@@ -63,14 +64,16 @@ def get_google_client():
         print("❌ Erreur connexion Google Sheets :", e, flush=True)
         return None
 
+
 # ------------------- AUTH -------------------
 @app.before_request
 def authenticate():
-    # Appliquer à /ciblage et /commande (comme avant)
+    # Appliquer à /ciblage et /commande
     if request.path.startswith(("/ciblage", "/commande")):
         api_key = request.headers.get("x-api-key")
         if api_key != API_KEY:
             return jsonify({"error": "Unauthorized"}), 401
+
 
 # ------------------- TEST REDSHIFT -------------------
 @app.route("/test-redshift")
@@ -81,7 +84,7 @@ def test_redshift():
             user=os.getenv("REDSHIFT_USER"),
             password=os.getenv("REDSHIFT_PASSWORD"),
             host=os.getenv("REDSHIFT_HOST"),
-            port=os.getenv("REDSHIFT_PORT", 5439)
+            port=os.getenv("REDSHIFT_PORT", 5439),
         )
         cur = conn.cursor()
         cur.execute("SELECT current_date;")
@@ -92,6 +95,7 @@ def test_redshift():
     except Exception as e:
         return jsonify({"status": "error ❌", "message": str(e)})
 
+
 # ------------------- CIBLAGE -------------------
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
@@ -99,6 +103,7 @@ def ciblage():
     geo_selection = data.get("geo_selection", [])
     age_min = int(data.get("age_min", 18))
     age_max = int(data.get("age_max", 120))
+
     if not isinstance(geo_selection, list) or not geo_selection:
         return jsonify({"error": "geo_selection must be a non-empty array"}), 400
 
@@ -132,12 +137,14 @@ def ciblage():
 
     where_geo = f"({' OR '.join(where_parts)})"
     params.extend([age_min, age_max])
+
     query = f"""
         SELECT COUNT(DISTINCT tel_mobile)
         FROM paralos_data
         WHERE {where_geo}
         AND age BETWEEN %s AND %s;
     """
+
     try:
         conn = psycopg2.connect(
             dbname=os.getenv("REDSHIFT_DBNAME"),
@@ -148,11 +155,11 @@ def ciblage():
         )
         with conn:
             with conn.cursor() as cur:
-                # affiche la requête complétée pour debug
                 try:
                     print("SQL FINAL :", cur.mogrify(query, tuple(params)).decode(), flush=True)
                 except Exception:
                     print("SQL (mogrify non disponible)", flush=True)
+
                 cur.execute(query, tuple(params))
                 result = cur.fetchone()
                 count = result[0] if result else 0
@@ -163,28 +170,33 @@ def ciblage():
         if sheet:
             try:
                 ws = sheet.worksheet(WS_COMPTAGES_NAME)
-                ws.append_row([
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    str(geo_selection),
-                    age_min,
-                    age_max,
-                    count
-                ])
+                ws.append_row(
+                    [
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        str(geo_selection),
+                        age_min,
+                        age_max,
+                        count,
+                    ]
+                )
                 print("✅ Comptage ajouté au Google Sheet.", flush=True)
             except Exception as sheet_error:
                 print("❌ Erreur ajout Google Sheet :", sheet_error, flush=True)
 
-        return jsonify({
-            "status": "success ✅",
-            "count": count,
-            "age_min": age_min,
-            "age_max": age_max,
-            "geo_selection_received": geo_selection
-        })
+        return jsonify(
+            {
+                "status": "success ✅",
+                "count": count,
+                "age_min": age_min,
+                "age_max": age_max,
+                "geo_selection_received": geo_selection,
+            }
+        )
 
     except Exception as e:
         print("❌ Erreur Redshift :", str(e), flush=True)
         return jsonify({"status": "error ❌", "message": str(e)}), 500
+
 
 # ------------------- COMMANDE -------------------
 def send_email(subject: str, body: str, sender: str, password: str, receivers: str):
@@ -196,62 +208,126 @@ def send_email(subject: str, body: str, sender: str, password: str, receivers: s
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
 
-        # Connexion SMTP SSL Gmail
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(sender, password)
             server.sendmail(sender, [r.strip() for r in receivers.split(",")], msg.as_string())
+
         print("✅ Email envoyé via Gmail SMTP", flush=True)
         return True
     except Exception as e:
         print("❌ Erreur envoi email :", e, flush=True)
         return False
-    
+
+
+def _pick(d: dict, *keys, default=""):
+    """Retourne la première valeur non vide trouvée parmi keys dans d."""
+    for k in keys:
+        v = d.get(k)
+        if v is not None and v != "":
+            return v
+    return default
+
+
 def normalize_commande_payload(data: dict) -> dict:
     """
-    Accepte payload legacy OU nouveau payload Paralos
-    et retourne une structure normalisée
+    Normalise le payload selon les champs EXACTS de ton screenshot:
+      - candidat: nom, prenom, id_paralos, adresse, cp, ville, tel1, tel2, email
+      - mandataire: nom, prenom, adresse, cp, ville, tel1, tel2, email
+      - lp: active, type_lp, lien_photo, lien_profession_de_foi, lien_bulletin_vote
+      - tarif: contacts, sms, lp, montant, opt_out
+      - age_filter: min, max, include_unknown_age
+      - geo_selection
+      - coverage
+      - dry-run
+    Et garde une compatibilité minimale avec quelques alias legacy (telephone/tel/phone, lien_pf/lien_bv, etc.)
     """
     normalized = {}
 
-    normalized["candidat"] = data.get("candidat", {})
-    normalized["mandataire"] = data.get("mandataire", {})
-    normalized["lp"] = data.get("lp", {})
-
-    # --- total contacts ---
-    if "comptage" in data:
-        normalized["total_contacts"] = int(data["comptage"].get("total", 0))
-        normalized["geo_selection"] = data["comptage"].get("geo_selection", [])
-        normalized["age_min"] = data["comptage"].get("age_min")
-        normalized["age_max"] = data["comptage"].get("age_max")
-    elif "tarif" in data:
-        normalized["total_contacts"] = int(data["tarif"].get("contacts", 0))
-        normalized["geo_selection"] = data.get("geo_selection", [])
-        normalized["age_min"] = None
-        normalized["age_max"] = None
-    else:
-        normalized["total_contacts"] = 0
-        normalized["geo_selection"] = []
-
-    # --- coverage / dry run ---
-    normalized["coverage"] = float(data.get("coverage", 1.0))
-    normalized["dry_run"] = bool(
-        data.get("dry_run") or data.get("dry-run", False)
-    )
-
-    # --- liens LP ---
-    lp = normalized["lp"]
-    normalized["lp_links"] = {
-        "photo": lp.get("lien_photo"),
-        "pf": lp.get("lien_pf") or lp.get("lien_profession_de_foi"),
-        "bv": lp.get("lien_bv") or lp.get("lien_bulletin_vote"),
+    # ------------------- CANDIDAT -------------------
+    candidat_in = data.get("candidat", {}) or {}
+    candidat = {
+        "nom": _pick(candidat_in, "nom", default=""),
+        "prenom": _pick(candidat_in, "prenom", default=""),
+        "id_paralos": _pick(candidat_in, "id_paralos", "id", default=""),
+        "adresse": _pick(candidat_in, "adresse", "address", default=""),
+        "cp": _pick(candidat_in, "cp", "postal_code", "code_postal", default=""),
+        "ville": _pick(candidat_in, "ville", "city", default=""),
+        "tel1": _pick(candidat_in, "tel1", "telephone", "tel", "phone", default=""),
+        "tel2": _pick(candidat_in, "tel2", "telephone_2", "tel2", default=""),
+        "email": _pick(candidat_in, "email", default=""),
     }
+    normalized["candidat"] = candidat
+
+    # ------------------- MANDATAIRE -------------------
+    mandataire_in = data.get("mandataire", {}) or {}
+    mandataire = {
+        "nom": _pick(mandataire_in, "nom", default=""),
+        "prenom": _pick(mandataire_in, "prenom", default=""),
+        "adresse": _pick(mandataire_in, "adresse", "address", default=""),
+        "cp": _pick(mandataire_in, "cp", "postal_code", "code_postal", default=""),
+        "ville": _pick(mandataire_in, "ville", "city", default=""),
+        "tel1": _pick(mandataire_in, "tel1", "telephone", "tel", "phone", default=""),
+        "tel2": _pick(mandataire_in, "tel2", "telephone_2", "tel2", default=""),
+        "email": _pick(mandataire_in, "email", default=""),
+    }
+    normalized["mandataire"] = mandataire
+
+    # ------------------- LP -------------------
+    lp_in = data.get("lp", {}) or {}
+    lp = {
+        "active": bool(lp_in.get("active", False)),
+        "type_lp": _pick(lp_in, "type_lp", default="standard"),
+        "lien_photo": _pick(lp_in, "lien_photo", default=""),
+        "lien_profession_de_foi": _pick(lp_in, "lien_profession_de_foi", "lien_pf", default=""),
+        "lien_bulletin_vote": _pick(lp_in, "lien_bulletin_vote", "lien_bv", default=""),
+    }
+    normalized["lp"] = lp
+
+    # ------------------- TARIF -------------------
+    tarif_in = data.get("tarif", {}) or {}
+    tarif = {
+        "contacts": int(tarif_in.get("contacts", 0) or 0),
+        "sms": float(tarif_in.get("sms", 1.0) or 1.0),      # dans ton screenshot: coveragePercentage/100
+        "lp": bool(tarif_in.get("lp", lp.get("active", False))),
+        "montant": tarif_in.get("montant", ""),
+        "opt_out": bool(tarif_in.get("opt_out", False)),
+    }
+    normalized["tarif"] = tarif
+
+    # ------------------- AGE FILTER -------------------
+    age_in = data.get("age_filter", {}) or {}
+    age_filter = {
+        "min": age_in.get("min", None),
+        "max": age_in.get("max", None),
+        "include_unknown_age": bool(age_in.get("include_unknown_age", False)),
+    }
+    normalized["age_filter"] = age_filter
+
+    # ------------------- AUTRES -------------------
+    geo_selection = data.get("geo_selection", []) or []
+    if not isinstance(geo_selection, list):
+        geo_selection = [geo_selection]
+    normalized["geo_selection"] = geo_selection
+
+    # coverage: dans ton screenshot c’est le même ratio que tarif.sms
+    # on privilégie coverage si présent, sinon tarif.sms
+    try:
+        normalized["coverage"] = float(data.get("coverage", tarif.get("sms", 1.0)))
+    except Exception:
+        normalized["coverage"] = float(tarif.get("sms", 1.0))
+
+    # dry-run (clé avec tiret)
+    normalized["dry_run"] = bool(data.get("dry_run") or data.get("dry-run", False))
+
+    # total_contacts (pour compat: réutilise tarif.contacts)
+    normalized["total_contacts"] = int(tarif.get("contacts", 0))
 
     return normalized
 
 
 @app.route("/commande", methods=["POST"])
 def commande():
-    data = request.get_json()
+    data = request.get_json() or {}
     if not data:
         return jsonify({"error": "Missing body"}), 400
 
@@ -259,15 +335,20 @@ def commande():
 
     candidat = payload["candidat"]
     mandataire = payload["mandataire"]
-    lp_links = payload["lp_links"]
+    lp = payload["lp"]
+    tarif = payload["tarif"]
+    age_filter = payload["age_filter"]
 
-    total_contacts = payload["total_contacts"]
     geo_selection = payload["geo_selection"]
     coverage = payload["coverage"]
     dry_run = payload["dry_run"]
+    total_contacts = payload["total_contacts"]
 
-    if not candidat or not mandataire:
-        return jsonify({"error": "Missing candidat or mandataire"}), 400
+    # ---- validations minimales ----
+    if not candidat.get("nom") and not candidat.get("prenom"):
+        return jsonify({"error": "Missing candidat.nom or candidat.prenom"}), 400
+    if not mandataire.get("nom") and not mandataire.get("prenom"):
+        return jsonify({"error": "Missing mandataire.nom or mandataire.prenom"}), 400
 
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -277,42 +358,108 @@ def commande():
     if sheet:
         try:
             ws = sheet.worksheet(WS_COMMANDES_NAME)
+
+            # IMPORTANT: adapte tes en-têtes de colonnes dans Google Sheet
+            # dans le même ordre que ci-dessous.
             ws.append_row([
                 created_at,
                 commande_id,
-                candidat.get("nom"), candidat.get("prenom"),
-                mandataire.get("nom"), mandataire.get("prenom"),
+
+                # candidat
+                candidat.get("nom", ""),
+                candidat.get("prenom", ""),
+                candidat.get("id_paralos", ""),
+                candidat.get("adresse", ""),
+                candidat.get("cp", ""),
+                candidat.get("ville", ""),
+                candidat.get("tel1", ""),
+                candidat.get("tel2", ""),
+                candidat.get("email", ""),
+
+                # mandataire
+                mandataire.get("nom", ""),
+                mandataire.get("prenom", ""),
+                mandataire.get("adresse", ""),
+                mandataire.get("cp", ""),
+                mandataire.get("ville", ""),
+                mandataire.get("tel1", ""),
+                mandataire.get("tel2", ""),
+                mandataire.get("email", ""),
+
+                # lp
+                lp.get("active", False),
+                lp.get("type_lp", "standard"),
+                lp.get("lien_photo", ""),
+                lp.get("lien_profession_de_foi", ""),
+                lp.get("lien_bulletin_vote", ""),
+
+                # tarif
                 total_contacts,
+                tarif.get("sms", ""),
+                tarif.get("lp", ""),
+                tarif.get("montant", ""),
+                tarif.get("opt_out", ""),
+
+                # age_filter
+                age_filter.get("min", ""),
+                age_filter.get("max", ""),
+                age_filter.get("include_unknown_age", ""),
+
+                # autres
+                str(geo_selection),
                 coverage,
                 dry_run,
-                str(geo_selection),
-                lp_links["photo"],
-                lp_links["pf"],
-                lp_links["bv"],
-                candidat.get("id_paralos")
             ])
+
             print("✅ Commande ajoutée au Google Sheet.", flush=True)
         except Exception as e:
             print("❌ Erreur Google Sheet :", e, flush=True)
 
     # ------------------- EMAIL -------------------
-    subject = f"[Publipol] Commande {commande_id} – {candidat.get('prenom')} {candidat.get('nom')}"
+    subject = f"[Publipol] Commande {commande_id} – {candidat.get('prenom','')} {candidat.get('nom','')}"
     body = f"""
 Nouvelle commande reçue
 
 ID : {commande_id}
-Candidat : {candidat.get('prenom')} {candidat.get('nom')}
-Mandataire : {mandataire.get('prenom')} {mandataire.get('nom')}
-Contacts : {total_contacts}
-Coverage : {coverage}
-Dry-run : {dry_run}
+Créée le : {created_at}
+
+CANDIDAT
+- Nom : {candidat.get('prenom','')} {candidat.get('nom','')}
+- id_paralos : {candidat.get('id_paralos','')}
+- Adresse : {candidat.get('adresse','')}, {candidat.get('cp','')} {candidat.get('ville','')}
+- Tel1 : {candidat.get('tel1','')}
+- Tel2 : {candidat.get('tel2','')}
+- Email : {candidat.get('email','')}
+
+MANDATAIRE
+- Nom : {mandataire.get('prenom','')} {mandataire.get('nom','')}
+- Adresse : {mandataire.get('adresse','')}, {mandataire.get('cp','')} {mandataire.get('ville','')}
+- Tel1 : {mandataire.get('tel1','')}
+- Tel2 : {mandataire.get('tel2','')}
+- Email : {mandataire.get('email','')}
+
+LP
+- Active : {lp.get('active', False)}
+- Type : {lp.get('type_lp','standard')}
+- Photo : {lp.get('lien_photo','')}
+- Profession de foi : {lp.get('lien_profession_de_foi','')}
+- Bulletin de vote : {lp.get('lien_bulletin_vote','')}
+
+TARIF
+- Contacts : {total_contacts}
+- SMS (ratio 0-1) : {tarif.get('sms','')}
+- LP : {tarif.get('lp','')}
+- Montant : {tarif.get('montant','')}
+- Opt-out : {tarif.get('opt_out','')}
+
+AGE FILTER
+- Min : {age_filter.get('min','')}
+- Max : {age_filter.get('max','')}
+- Include unknown age : {age_filter.get('include_unknown_age','')}
 
 Zones : {geo_selection}
-
-Liens LP:
-- Photo : {lp_links['photo']}
-- Profession de foi : {lp_links['pf']}
-- Bulletin : {lp_links['bv']}
+Coverage : {coverage}
+Dry-run : {dry_run}
 """
 
     if EMAIL_SENDER and EMAIL_PASSWORD and EMAIL_RECEIVER:
