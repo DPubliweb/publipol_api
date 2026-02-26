@@ -352,10 +352,10 @@ def commande():
         try:
             ws = sheet.worksheet(WS_COMMANDES_NAME)
 
-            ws.append_row([
+            row_data = [[
                 created_at,
                 commande_id,
-
+            
                 # candidat
                 candidat.get("nom", ""),
                 candidat.get("prenom", ""),
@@ -366,7 +366,7 @@ def commande():
                 candidat.get("tel1", ""),
                 candidat.get("tel2", ""),
                 candidat.get("email", ""),
-
+            
                 # mandataire
                 mandataire.get("nom", ""),
                 mandataire.get("prenom", ""),
@@ -376,31 +376,41 @@ def commande():
                 mandataire.get("tel1", ""),
                 mandataire.get("tel2", ""),
                 mandataire.get("email", ""),
-
+            
                 # lp
                 lp.get("active", False),
                 lp.get("type_lp", "standard"),
                 lp.get("lien_photo", ""),
                 lp.get("lien_profession_de_foi", ""),
                 lp.get("lien_bulletin_vote", ""),
-
+            
                 # tarif
                 total_contacts,
                 tarif.get("sms", ""),
                 tarif.get("lp", ""),
                 tarif.get("montant", ""),
                 tarif.get("opt_out", ""),
-
+            
                 # age_filter
                 age_filter.get("min", ""),
                 age_filter.get("max", ""),
                 age_filter.get("include_unknown_age", ""),
-
+            
                 # autres
                 str(geo_selection),
                 coverage,
                 dry_run,
-            ])
+            ]]
+        
+            # 🔒 Calcul robuste de la prochaine ligne
+            next_row = ws.row_count + 1
+            
+            # Méthode plus fiable : trouver la dernière ligne réellement remplie
+            values = ws.col_values(1)  # colonne A
+            next_row = len(values) + 1
+            
+            # Écriture forcée en colonne A
+            ws.update(f"A{next_row}", row_data)
 
             print("✅ Commande ajoutée au Google Sheet.", flush=True)
 
