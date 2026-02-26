@@ -328,27 +328,20 @@ def normalize_commande_payload(data: dict) -> dict:
 @app.route("/commande", methods=["POST"])
 def commande():
     data = request.get_json() or {}
-    if not data:
-        return jsonify({"error": "Missing body"}), 400
 
+    # Même si body vide → on continue
     payload = normalize_commande_payload(data)
 
-    candidat = payload["candidat"]
-    mandataire = payload["mandataire"]
-    lp = payload["lp"]
-    tarif = payload["tarif"]
-    age_filter = payload["age_filter"]
+    candidat = payload.get("candidat", {})
+    mandataire = payload.get("mandataire", {})
+    lp = payload.get("lp", {})
+    tarif = payload.get("tarif", {})
+    age_filter = payload.get("age_filter", {})
 
-    geo_selection = payload["geo_selection"]
-    coverage = payload["coverage"]
-    dry_run = payload["dry_run"]
-    total_contacts = payload["total_contacts"]
-
-    # ---- validations minimales ----
-    if not candidat.get("nom") and not candidat.get("prenom"):
-        return jsonify({"error": "Missing candidat.nom or candidat.prenom"}), 400
-    if not mandataire.get("nom") and not mandataire.get("prenom"):
-        return jsonify({"error": "Missing mandataire.nom or mandataire.prenom"}), 400
+    geo_selection = payload.get("geo_selection", [])
+    coverage = payload.get("coverage", "")
+    dry_run = payload.get("dry_run", False)
+    total_contacts = payload.get("total_contacts", 0)
 
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -359,8 +352,6 @@ def commande():
         try:
             ws = sheet.worksheet(WS_COMMANDES_NAME)
 
-            # IMPORTANT: adapte tes en-têtes de colonnes dans Google Sheet
-            # dans le même ordre que ci-dessous.
             ws.append_row([
                 created_at,
                 commande_id,
@@ -412,11 +403,13 @@ def commande():
             ])
 
             print("✅ Commande ajoutée au Google Sheet.", flush=True)
+
         except Exception as e:
             print("❌ Erreur Google Sheet :", e, flush=True)
 
     # ------------------- EMAIL -------------------
-    subject = f"[Publipol] Commande {commande_id} – {candidat.get('prenom','')} {candidat.get('nom','')}"
+    subject = f"[Publipol] Commande {commande_id}"
+
     body = f"""
 Nouvelle commande reçue
 
@@ -424,38 +417,38 @@ ID : {commande_id}
 Créée le : {created_at}
 
 CANDIDAT
-- Nom : {candidat.get('prenom','')} {candidat.get('nom','')}
-- id_paralos : {candidat.get('id_paralos','')}
-- Adresse : {candidat.get('adresse','')}, {candidat.get('cp','')} {candidat.get('ville','')}
-- Tel1 : {candidat.get('tel1','')}
-- Tel2 : {candidat.get('tel2','')}
-- Email : {candidat.get('email','')}
+Nom : {candidat.get('prenom','')} {candidat.get('nom','')}
+id_paralos : {candidat.get('id_paralos','')}
+Adresse : {candidat.get('adresse','')}, {candidat.get('cp','')} {candidat.get('ville','')}
+Tel1 : {candidat.get('tel1','')}
+Tel2 : {candidat.get('tel2','')}
+Email : {candidat.get('email','')}
 
 MANDATAIRE
-- Nom : {mandataire.get('prenom','')} {mandataire.get('nom','')}
-- Adresse : {mandataire.get('adresse','')}, {mandataire.get('cp','')} {mandataire.get('ville','')}
-- Tel1 : {mandataire.get('tel1','')}
-- Tel2 : {mandataire.get('tel2','')}
-- Email : {mandataire.get('email','')}
+Nom : {mandataire.get('prenom','')} {mandataire.get('nom','')}
+Adresse : {mandataire.get('adresse','')}, {mandataire.get('cp','')} {mandataire.get('ville','')}
+Tel1 : {mandataire.get('tel1','')}
+Tel2 : {mandataire.get('tel2','')}
+Email : {mandataire.get('email','')}
 
 LP
-- Active : {lp.get('active', False)}
-- Type : {lp.get('type_lp','standard')}
-- Photo : {lp.get('lien_photo','')}
-- Profession de foi : {lp.get('lien_profession_de_foi','')}
-- Bulletin de vote : {lp.get('lien_bulletin_vote','')}
+Active : {lp.get('active', False)}
+Type : {lp.get('type_lp','standard')}
+Photo : {lp.get('lien_photo','')}
+Profession de foi : {lp.get('lien_profession_de_foi','')}
+Bulletin de vote : {lp.get('lien_bulletin_vote','')}
 
 TARIF
-- Contacts : {total_contacts}
-- SMS (ratio 0-1) : {tarif.get('sms','')}
-- LP : {tarif.get('lp','')}
-- Montant : {tarif.get('montant','')}
-- Opt-out : {tarif.get('opt_out','')}
+Contacts : {total_contacts}
+SMS : {tarif.get('sms','')}
+LP : {tarif.get('lp','')}
+Montant : {tarif.get('montant','')}
+Opt-out : {tarif.get('opt_out','')}
 
 AGE FILTER
-- Min : {age_filter.get('min','')}
-- Max : {age_filter.get('max','')}
-- Include unknown age : {age_filter.get('include_unknown_age','')}
+Min : {age_filter.get('min','')}
+Max : {age_filter.get('max','')}
+Include unknown age : {age_filter.get('include_unknown_age','')}
 
 Zones : {geo_selection}
 Coverage : {coverage}
