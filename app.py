@@ -418,7 +418,7 @@ def commande():
         #  ------------------- SHEET PUBLIPOL -------------------
     try:
     
-        ws_publipol = sheet.worksheet("Publipol")
+        ws_publipol = sheet.worksheet("Suivi Publipol")
     
         opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
     
