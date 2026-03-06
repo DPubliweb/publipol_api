@@ -324,7 +324,6 @@ def normalize_commande_payload(data: dict) -> dict:
 
     return normalized
 
-
 @app.route("/commande", methods=["POST"])
 def commande():
 
@@ -345,10 +344,16 @@ def commande():
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    print("📥 Nouvelle commande reçue", flush=True)
+
     # ------------------- GOOGLE SHEETS -------------------
     sheet = get_google_client()
 
-    if sheet:
+    if not sheet:
+        print("❌ Impossible de se connecter à Google Sheets", flush=True)
+    else:
+
+        print("📄 Worksheets disponibles:", [ws.title for ws in sheet.worksheets()], flush=True)
 
         # ------------------- SHEET COMMANDES -------------------
         try:
@@ -359,7 +364,6 @@ def commande():
                 created_at,
                 commande_id,
 
-                # candidat
                 candidat.get("nom", ""),
                 candidat.get("prenom", ""),
                 candidat.get("id_paralos", ""),
@@ -370,7 +374,6 @@ def commande():
                 candidat.get("tel2", ""),
                 candidat.get("email", ""),
 
-                # mandataire
                 mandataire.get("nom", ""),
                 mandataire.get("prenom", ""),
                 mandataire.get("adresse", ""),
@@ -380,26 +383,22 @@ def commande():
                 mandataire.get("tel2", ""),
                 mandataire.get("email", ""),
 
-                # lp
                 lp.get("active", False),
                 lp.get("type_lp", "standard"),
                 lp.get("lien_photo", ""),
                 lp.get("lien_profession_de_foi", ""),
                 lp.get("lien_bulletin_vote", ""),
 
-                # tarif
                 total_contacts,
                 tarif.get("sms", ""),
                 tarif.get("lp", ""),
                 tarif.get("montant", ""),
                 tarif.get("opt_out", ""),
 
-                # age filter
                 age_filter.get("min", ""),
                 age_filter.get("max", ""),
                 age_filter.get("include_unknown_age", ""),
 
-                # autres
                 str(geo_selection),
                 coverage,
                 dry_run
@@ -408,49 +407,54 @@ def commande():
             values = ws.col_values(1)
             next_row = len(values) + 1
 
-            ws.update(f"A{next_row}", row_data)
+            ws.update(row_data, f"A{next_row}")
 
             print("✅ Commande ajoutée au sheet Commandes", flush=True)
 
         except Exception as e:
-            print("❌ Erreur sheet Commandes :", e, flush=True)
+            print("❌ Erreur sheet Commandes :", str(e), flush=True)
 
-        #  ------------------- SHEET PUBLIPOL -------------------
-    try:
-    
-        ws_publipol = sheet.worksheet("Suivi Publipol")
-    
-        opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
-    
-        publipol_row = [
-            datetime.now().strftime("%d/%m/%Y"),
-    
-            f"{candidat.get('prenom','')} {candidat.get('nom','')}",
-            candidat.get("tel1", ""),
-            candidat.get("email", ""),
-    
-            f"{mandataire.get('prenom','')} {mandataire.get('nom','')}",
-            mandataire.get("tel1", ""),
-            mandataire.get("email", ""),
-    
-            "Devis à FAIRE",
-            opt_out_value,
-    
-            candidat.get("id_paralos", ""),
-            total_contacts,
-            "Oui",
-            tarif.get("montant", ""),
-            str(geo_selection)
-        ]
-    
-        ws_publipol.append_row(publipol_row, value_input_option="USER_ENTERED")
-    
-        print("✅ Commande ajoutée au sheet Publipol", flush=True)
-    
-    except Exception as e:
-        print("❌ Erreur sheet Publipol :", e, flush=True)
+        # ------------------- SHEET PUBLIPOL -------------------
+        try:
+
+            print("🔎 Recherche worksheet 'Suivi Publipol'", flush=True)
+
+            ws_publipol = sheet.worksheet("Suivi Publipol")
+
+            opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
+
+            publipol_row = [
+                datetime.now().strftime("%d/%m/%Y"),
+
+                f"{candidat.get('prenom','')} {candidat.get('nom','')}",
+                candidat.get("tel1", ""),
+                candidat.get("email", ""),
+
+                f"{mandataire.get('prenom','')} {mandataire.get('nom','')}",
+                mandataire.get("tel1", ""),
+                mandataire.get("email", ""),
+
+                "Devis à FAIRE",
+                opt_out_value,
+
+                candidat.get("id_paralos", ""),
+                total_contacts,
+                "Oui",
+                tarif.get("montant", ""),
+                str(geo_selection)
+            ]
+
+            print("📝 Ligne Publipol:", publipol_row, flush=True)
+
+            ws_publipol.append_row(publipol_row, value_input_option="USER_ENTERED")
+
+            print("✅ Commande ajoutée au sheet Publipol", flush=True)
+
+        except Exception as e:
+            print("❌ Erreur sheet Publipol :", str(e), flush=True)
 
     # ------------------- EMAIL -------------------
+
     subject = f"[Publipol] Commande {commande_id}"
 
     body = f"""
