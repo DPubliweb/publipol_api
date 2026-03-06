@@ -345,6 +345,7 @@ def commande():
 
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nom_complet = f"{candidat.get('prenom','')} {candidat.get('nom','')}".strip() or "N/A"
 
     # ------------------- GOOGLE SHEET -------------------
     sheet = get_google_client()
@@ -416,6 +417,43 @@ def commande():
 
         except Exception as e:
             print("❌ Erreur Google Sheet :", e, flush=True)
+
+            # ------------------- SHEET PUBLIPOL -------------------
+        try:
+            ws_publipol = sheet.worksheet("Publipol")
+        
+            opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
+        
+            publipol_row = [[
+                datetime.now().strftime("%d/%m/%Y"),   # date
+                
+                f"{candidat.get('prenom','')} {candidat.get('nom','')}",
+                candidat.get("tel1", ""),
+                candidat.get("email", ""),
+        
+                f"{mandataire.get('prenom','')} {mandataire.get('nom','')}",
+                mandataire.get("tel1", ""),
+                mandataire.get("email", ""),
+        
+                "Devis à FAIRE",
+                opt_out_value,
+        
+                candidat.get("id_paralos", ""),
+                total_contacts,
+                "Oui",
+                tarif.get("montant", ""),
+                str(geo_selection)
+            ]]
+        
+            values = ws_publipol.col_values(1)
+            next_row = len(values) + 1
+        
+            ws_publipol.update(f"A{next_row}", publipol_row)
+        
+            print("✅ Commande ajoutée au sheet Publipol", flush=True)
+        
+        except Exception as e:
+            print("❌ Erreur sheet Publipol :", e, flush=True)
 
     # ------------------- EMAIL -------------------
     subject = f"[Publipol] Commande {commande_id}"
