@@ -327,9 +327,8 @@ def normalize_commande_payload(data: dict) -> dict:
 
 @app.route("/commande", methods=["POST"])
 def commande():
-    data = request.get_json() or {}
 
-    # Même si body vide → on continue
+    data = request.get_json() or {}
     payload = normalize_commande_payload(data)
 
     candidat = payload.get("candidat", {})
@@ -345,18 +344,21 @@ def commande():
 
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    nom_complet = f"{candidat.get('prenom','')} {candidat.get('nom','')}".strip() or "N/A"
 
-    # ------------------- GOOGLE SHEET -------------------
+    # ------------------- GOOGLE SHEETS -------------------
     sheet = get_google_client()
+
     if sheet:
+
+        # ------------------- SHEET COMMANDES -------------------
         try:
+
             ws = sheet.worksheet(WS_COMMANDES_NAME)
 
             row_data = [[
                 created_at,
                 commande_id,
-            
+
                 # candidat
                 candidat.get("nom", ""),
                 candidat.get("prenom", ""),
@@ -367,7 +369,7 @@ def commande():
                 candidat.get("tel1", ""),
                 candidat.get("tel2", ""),
                 candidat.get("email", ""),
-            
+
                 # mandataire
                 mandataire.get("nom", ""),
                 mandataire.get("prenom", ""),
@@ -377,81 +379,77 @@ def commande():
                 mandataire.get("tel1", ""),
                 mandataire.get("tel2", ""),
                 mandataire.get("email", ""),
-            
+
                 # lp
                 lp.get("active", False),
                 lp.get("type_lp", "standard"),
                 lp.get("lien_photo", ""),
                 lp.get("lien_profession_de_foi", ""),
                 lp.get("lien_bulletin_vote", ""),
-            
+
                 # tarif
                 total_contacts,
                 tarif.get("sms", ""),
                 tarif.get("lp", ""),
                 tarif.get("montant", ""),
                 tarif.get("opt_out", ""),
-            
-                # age_filter
+
+                # age filter
                 age_filter.get("min", ""),
                 age_filter.get("max", ""),
                 age_filter.get("include_unknown_age", ""),
-            
+
                 # autres
                 str(geo_selection),
                 coverage,
-                dry_run,
+                dry_run
             ]]
-        
-            # 🔒 Calcul robuste de la prochaine ligne
-            next_row = ws.row_count + 1
-            
-            # Méthode plus fiable : trouver la dernière ligne réellement remplie
-            values = ws.col_values(1)  # colonne A
+
+            values = ws.col_values(1)
             next_row = len(values) + 1
-            
-            # Écriture forcée en colonne A
+
             ws.update(f"A{next_row}", row_data)
 
-            print("✅ Commande ajoutée au Google Sheet.", flush=True)
+            print("✅ Commande ajoutée au sheet Commandes", flush=True)
 
         except Exception as e:
-            print("❌ Erreur Google Sheet :", e, flush=True)
+            print("❌ Erreur sheet Commandes :", e, flush=True)
 
-            # ------------------- SHEET PUBLIPOL -------------------
+        # ------------------- SHEET PUBLIPOL -------------------
         try:
+
             ws_publipol = sheet.worksheet("Publipol")
-        
+
             opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
-        
+
             publipol_row = [[
-                datetime.now().strftime("%d/%m/%Y"),   # date
-                
+                datetime.now().strftime("%d/%m/%Y"),
+
                 f"{candidat.get('prenom','')} {candidat.get('nom','')}",
                 candidat.get("tel1", ""),
                 candidat.get("email", ""),
-        
+
                 f"{mandataire.get('prenom','')} {mandataire.get('nom','')}",
                 mandataire.get("tel1", ""),
                 mandataire.get("email", ""),
-        
+
                 "Devis à FAIRE",
                 opt_out_value,
-        
+
                 candidat.get("id_paralos", ""),
                 total_contacts,
                 "Oui",
                 tarif.get("montant", ""),
                 str(geo_selection)
             ]]
-        
+
             values = ws_publipol.col_values(1)
             next_row = len(values) + 1
-        
+
             ws_publipol.update(f"A{next_row}", publipol_row)
-        
+
             print("✅ Commande ajoutée au sheet Publipol", flush=True)
-        
+
         except Exception as e:
             print("❌ Erreur sheet Publipol :", e, flush=True)
 
@@ -482,21 +480,12 @@ Email : {mandataire.get('email','')}
 LP
 Active : {lp.get('active', False)}
 Type : {lp.get('type_lp','standard')}
-Photo : {lp.get('lien_photo','')}
-Profession de foi : {lp.get('lien_profession_de_foi','')}
-Bulletin de vote : {lp.get('lien_bulletin_vote','')}
 
 TARIF
 Contacts : {total_contacts}
 SMS : {tarif.get('sms','')}
-LP : {tarif.get('lp','')}
 Montant : {tarif.get('montant','')}
 Opt-out : {tarif.get('opt_out','')}
-
-AGE FILTER
-Min : {age_filter.get('min','')}
-Max : {age_filter.get('max','')}
-Include unknown age : {age_filter.get('include_unknown_age','')}
 
 Zones : {geo_selection}
 Coverage : {coverage}
