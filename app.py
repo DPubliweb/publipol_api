@@ -346,14 +346,13 @@ def commande():
 
     print("📥 Nouvelle commande reçue :", commande_id, flush=True)
 
-    # ------------------- GOOGLE SHEETS -------------------
     sheet = get_google_client()
 
     if not sheet:
         print("❌ Impossible de se connecter à Google Sheets", flush=True)
     else:
 
-        print("📄 Worksheets:", [(ws.title, ws.id) for ws in sheet.worksheets()], flush=True)
+        print("📄 Worksheets:", [ws.title for ws in sheet.worksheets()], flush=True)
 
         # ------------------- SHEET COMMANDES -------------------
         try:
@@ -414,11 +413,7 @@ def commande():
         # ------------------- SHEET SUIVI PUBLIPOL -------------------
         try:
 
-            print("🔎 Recherche worksheet Publipol par ID", flush=True)
-
-            ws_publipol = sheet.get_worksheet_by_id(0)
-
-            print("✅ Worksheet trouvé :", ws_publipol.title, flush=True)
+            ws_publipol = sheet.worksheet("Suivi Publipol")
 
             opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
 
@@ -447,10 +442,10 @@ def commande():
 
             ws_publipol.append_row(publipol_row, value_input_option="USER_ENTERED")
 
-            print("✅ Commande ajoutée au sheet Publipol", flush=True)
+            print("✅ Commande ajoutée au sheet Suivi Publipol", flush=True)
 
         except Exception as e:
-            print("❌ Erreur sheet Publipol :", str(e), flush=True)
+            print("❌ Erreur sheet Suivi Publipol :", str(e), flush=True)
 
     # ------------------- EMAIL -------------------
 
@@ -464,32 +459,17 @@ Créée le : {created_at}
 
 CANDIDAT
 Nom : {candidat.get('prenom','')} {candidat.get('nom','')}
-id_paralos : {candidat.get('id_paralos','')}
-Adresse : {candidat.get('adresse','')}, {candidat.get('cp','')} {candidat.get('ville','')}
-Tel1 : {candidat.get('tel1','')}
-Tel2 : {candidat.get('tel2','')}
+Tel : {candidat.get('tel1','')}
 Email : {candidat.get('email','')}
 
 MANDATAIRE
 Nom : {mandataire.get('prenom','')} {mandataire.get('nom','')}
-Adresse : {mandataire.get('adresse','')}, {mandataire.get('cp','')} {mandataire.get('ville','')}
-Tel1 : {mandataire.get('tel1','')}
-Tel2 : {mandataire.get('tel2','')}
+Tel : {mandataire.get('tel1','')}
 Email : {mandataire.get('email','')}
 
-LP
-Active : {lp.get('active', False)}
-Type : {lp.get('type_lp','standard')}
-
-TARIF
 Contacts : {total_contacts}
-SMS : {tarif.get('sms','')}
 Montant : {tarif.get('montant','')}
-Opt-out : {tarif.get('opt_out','')}
-
 Zones : {geo_selection}
-Coverage : {coverage}
-Dry-run : {dry_run}
 """
 
     if EMAIL_SENDER and EMAIL_PASSWORD and EMAIL_RECEIVER:
