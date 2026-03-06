@@ -344,7 +344,7 @@ def commande():
     commande_id = str(uuid.uuid4())
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    print("📥 Nouvelle commande reçue", flush=True)
+    print("📥 Nouvelle commande reçue :", commande_id, flush=True)
 
     # ------------------- GOOGLE SHEETS -------------------
     sheet = get_google_client()
@@ -353,14 +353,14 @@ def commande():
         print("❌ Impossible de se connecter à Google Sheets", flush=True)
     else:
 
-        print("📄 Worksheets disponibles:", [ws.title for ws in sheet.worksheets()], flush=True)
+        print("📄 Worksheets:", [(ws.title, ws.id) for ws in sheet.worksheets()], flush=True)
 
         # ------------------- SHEET COMMANDES -------------------
         try:
 
             ws = sheet.worksheet(WS_COMMANDES_NAME)
 
-            row_data = [[
+            row_data = [
                 created_at,
                 commande_id,
 
@@ -402,24 +402,23 @@ def commande():
                 str(geo_selection),
                 coverage,
                 dry_run
-            ]]
+            ]
 
-            values = ws.col_values(1)
-            next_row = len(values) + 1
-
-            ws.update(row_data, f"A{next_row}")
+            ws.append_row(row_data, value_input_option="USER_ENTERED")
 
             print("✅ Commande ajoutée au sheet Commandes", flush=True)
 
         except Exception as e:
             print("❌ Erreur sheet Commandes :", str(e), flush=True)
 
-        # ------------------- SHEET PUBLIPOL -------------------
+        # ------------------- SHEET SUIVI PUBLIPOL -------------------
         try:
 
-            print("🔎 Recherche worksheet 'Suivi Publipol'", flush=True)
+            print("🔎 Recherche worksheet Publipol par ID", flush=True)
 
-            ws_publipol = sheet.worksheet("Suivi Publipol")
+            ws_publipol = sheet.get_worksheet_by_id(0)
+
+            print("✅ Worksheet trouvé :", ws_publipol.title, flush=True)
 
             opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
 
@@ -444,7 +443,7 @@ def commande():
                 str(geo_selection)
             ]
 
-            print("📝 Ligne Publipol:", publipol_row, flush=True)
+            print("📝 Ligne Publipol :", publipol_row, flush=True)
 
             ws_publipol.append_row(publipol_row, value_input_option="USER_ENTERED")
 
@@ -501,7 +500,6 @@ Dry-run : {dry_run}
         "status": "ok",
         "normalized": payload
     })
-
 
 # ------------------- MAIN -------------------
 if __name__ == "__main__":
