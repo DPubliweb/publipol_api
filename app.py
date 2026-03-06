@@ -415,7 +415,7 @@ def commande():
         except Exception as e:
             print("❌ Erreur sheet Commandes :", e, flush=True)
 
-        # ------------------- SHEET PUBLIPOL -------------------
+        #  ------------------- SHEET PUBLIPOL -------------------
         try:
 
             ws_publipol = sheet.worksheet("Publipol")
