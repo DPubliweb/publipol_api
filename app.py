@@ -376,11 +376,15 @@ def commande():
 
                 "Devis à FAIRE",
                 opt_out_value,
-
+                "OUI"
                 candidat.get("id_paralos", ""),
+                " ",
                 total_contacts,
+                " ",
+                coverage,
                 "Oui",
                 tarif.get("montant", ""),
+                " ",
                 str(geo_selection)
             ]
 
