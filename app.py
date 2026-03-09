@@ -354,62 +354,6 @@ def commande():
 
         print("📄 Worksheets:", [ws.title for ws in sheet.worksheets()], flush=True)
 
-        # ------------------- SHEET COMMANDES -------------------
-        try:
-
-            ws = sheet.worksheet(WS_COMMANDES_NAME)
-
-            row_data = [
-                created_at,
-                commande_id,
-
-                candidat.get("nom", ""),
-                candidat.get("prenom", ""),
-                candidat.get("id_paralos", ""),
-                candidat.get("adresse", ""),
-                candidat.get("cp", ""),
-                candidat.get("ville", ""),
-                candidat.get("tel1", ""),
-                candidat.get("tel2", ""),
-                candidat.get("email", ""),
-
-                mandataire.get("nom", ""),
-                mandataire.get("prenom", ""),
-                mandataire.get("adresse", ""),
-                mandataire.get("cp", ""),
-                mandataire.get("ville", ""),
-                mandataire.get("tel1", ""),
-                mandataire.get("tel2", ""),
-                mandataire.get("email", ""),
-
-                lp.get("active", False),
-                lp.get("type_lp", "standard"),
-                lp.get("lien_photo", ""),
-                lp.get("lien_profession_de_foi", ""),
-                lp.get("lien_bulletin_vote", ""),
-
-                total_contacts,
-                tarif.get("sms", ""),
-                tarif.get("lp", ""),
-                tarif.get("montant", ""),
-                tarif.get("opt_out", ""),
-
-                age_filter.get("min", ""),
-                age_filter.get("max", ""),
-                age_filter.get("include_unknown_age", ""),
-
-                str(geo_selection),
-                coverage,
-                dry_run
-            ]
-
-            ws.append_row(row_data, value_input_option="USER_ENTERED")
-
-            print("✅ Commande ajoutée au sheet Commandes", flush=True)
-
-        except Exception as e:
-            print("❌ Erreur sheet Commandes :", str(e), flush=True)
-
         # ------------------- SHEET SUIVI PUBLIPOL -------------------
         try:
 
@@ -423,10 +367,12 @@ def commande():
                 f"{candidat.get('prenom','')} {candidat.get('nom','')}",
                 candidat.get("tel1", ""),
                 candidat.get("email", ""),
+                f"{candidat.get('adresse','')} {candidat.get('cp','')} {candidat.get('ville','')}",
 
                 f"{mandataire.get('prenom','')} {mandataire.get('nom','')}",
                 mandataire.get("tel1", ""),
                 mandataire.get("email", ""),
+                f"{mandataire.get('adresse','')} {mandataire.get('cp','')} {mandataire.get('ville','')}",
 
                 "Devis à FAIRE",
                 opt_out_value,
