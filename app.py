@@ -376,7 +376,7 @@ def commande():
 
                 "Devis à FAIRE",
                 opt_out_value,
-                "OUI"
+                "OUI",
                 candidat.get("id_paralos", ""),
                 " ",
                 total_contacts,
