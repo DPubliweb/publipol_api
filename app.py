@@ -413,7 +413,7 @@ def commande():
         # ------------------- SHEET SUIVI PUBLIPOL -------------------
         try:
 
-            ws_publipol = sheet.worksheet("Suivi Publipol")
+            ws = sheet.worksheet(WS_COMMANDES_NAME)
 
             opt_out_value = "OUI" if tarif.get("opt_out", False) else "NON"
 
@@ -440,7 +440,7 @@ def commande():
 
             print("📝 Ligne Publipol :", publipol_row, flush=True)
 
-            ws_publipol.append_row(publipol_row, value_input_option="USER_ENTERED")
+            ws.append_row(publipol_row, value_input_option="USER_ENTERED")
 
             print("✅ Commande ajoutée au sheet Suivi Publipol", flush=True)
 
