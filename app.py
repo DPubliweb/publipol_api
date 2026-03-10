@@ -380,7 +380,6 @@ def commande():
                 candidat.get("id_paralos", ""),
                 " ",
                 total_contacts,
-                " ",
                 coverage,
                 "Oui",
                 tarif.get("montant", ""),
