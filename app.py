@@ -97,12 +97,26 @@ def test_redshift():
 
 
 # ------------------- CIBLAGE -------------------
+def to_bool(value):
+    """Convertit proprement les booléens venant de JSON / string / int."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "oui", "on")
+    return False
+
+
 @app.route("/ciblage", methods=["POST"])
 def ciblage():
     data = request.get_json() or {}
     geo_selection = data.get("geo_selection", [])
     age_min = int(data.get("age_min", 18))
     age_max = int(data.get("age_max", 120))
+    include_unknown_age = to_bool(data.get("include_unknown_age", False))
 
     if not isinstance(geo_selection, list) or not geo_selection:
         return jsonify({"error": "geo_selection must be a non-empty array"}), 400
@@ -119,14 +133,17 @@ def ciblage():
             print(f"⚠ Code non reconnu : {code}", flush=True)
 
     params, where_parts = [], []
+
     if code_bdv_list:
         placeholders = ", ".join(["%s"] * len(code_bdv_list))
         where_parts.append(f"code_bdv IN ({placeholders})")
         params.extend(code_bdv_list)
+
     if code_commune_list:
         placeholders = ", ".join(["%s"] * len(code_commune_list))
         where_parts.append(f"code_commune IN ({placeholders})")
         params.extend(code_commune_list)
+
     if code_circo_list:
         placeholders = ", ".join(["%s"] * len(code_circo_list))
         where_parts.append(f"code_circo IN ({placeholders})")
@@ -136,13 +153,19 @@ def ciblage():
         return jsonify({"error": "Aucun identifiant géographique valide"}), 400
 
     where_geo = f"({' OR '.join(where_parts)})"
+
+    if include_unknown_age:
+        age_condition = "(age BETWEEN %s AND %s OR age IS NULL)"
+    else:
+        age_condition = "age BETWEEN %s AND %s"
+
     params.extend([age_min, age_max])
 
     query = f"""
         SELECT COUNT(DISTINCT tel_mobile)
         FROM paralos_data
         WHERE {where_geo}
-        AND age BETWEEN %s AND %s;
+        AND {age_condition};
     """
 
     try:
@@ -153,9 +176,11 @@ def ciblage():
             host=os.getenv("REDSHIFT_HOST"),
             port=int(os.getenv("REDSHIFT_PORT", 5439)),
         )
+
         with conn:
             with conn.cursor() as cur:
                 try:
+                    print("include_unknown_age :", include_unknown_age, flush=True)
                     print("SQL FINAL :", cur.mogrify(query, tuple(params)).decode(), flush=True)
                 except Exception:
                     print("SQL (mogrify non disponible)", flush=True)
@@ -176,6 +201,7 @@ def ciblage():
                         str(geo_selection),
                         age_min,
                         age_max,
+                        include_unknown_age,
                         count,
                     ]
                 )
@@ -189,6 +215,7 @@ def ciblage():
                 "count": count,
                 "age_min": age_min,
                 "age_max": age_max,
+                "include_unknown_age": include_unknown_age,
                 "geo_selection_received": geo_selection,
             }
         )
@@ -196,7 +223,6 @@ def ciblage():
     except Exception as e:
         print("❌ Erreur Redshift :", str(e), flush=True)
         return jsonify({"status": "error ❌", "message": str(e)}), 500
-
 
 # ------------------- COMMANDE -------------------
 def send_email(subject: str, body: str, sender: str, password: str, receivers: str):
